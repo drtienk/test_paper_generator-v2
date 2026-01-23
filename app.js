@@ -511,24 +511,23 @@ class WordGenerator {
 
     // 生成答案卷（教師用）
     async generateAnswerSheet(examName, questions) {
-        const doc = new docx.Document({
-            sections: [{
-                properties: {},
+        // 所有內容將添加到同一個 section，確保連續流動
+        const allChildren = [];
+        
+        // 標題
+        allChildren.push(
+            new docx.Paragraph({
                 children: [
-                    new docx.Paragraph({
-                        children: [
-                            new docx.TextRun({
-                                text: `${examName} - Answer Sheet`,
-                                bold: true,
-                                size: 32
-                            })
-                        ],
-                        alignment: docx.AlignmentType.CENTER,
-                        spacing: { after: 400 }
+                    new docx.TextRun({
+                        text: `${examName} - Answer Sheet`,
+                        bold: true,
+                        size: 32
                     })
-                ]
-            }]
-        });
+                ],
+                alignment: docx.AlignmentType.CENTER,
+                spacing: { after: 400 }
+            })
+        );
 
         // 答案摘要表格（在詳細題目之前）
         const summaryTableRows = [];
@@ -739,10 +738,15 @@ class WordGenerator {
             }
         });
 
-        // 將所有答案添加到同一個 section
-        doc.addSection({
-            properties: {},
-            children: answerChildren
+        // 將摘要表格和詳細題目都添加到同一個陣列
+        allChildren.push(...answerChildren);
+        
+        // 創建單一 section，包含所有內容（標題、摘要表格、詳細題目）
+        const doc = new docx.Document({
+            sections: [{
+                properties: {},
+                children: allChildren
+            }]
         });
 
         const blob = await docx.Packer.toBlob(doc);
