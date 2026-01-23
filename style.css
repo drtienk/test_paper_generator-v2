@@ -84,6 +84,20 @@ h2 {
     align-items: center;
 }
 
+.question-count-input {
+    width: 60px;
+    padding: 5px;
+    border: 2px solid #ddd;
+    border-radius: 4px;
+    font-size: 14px;
+    text-align: center;
+}
+
+.question-count-input:focus {
+    outline: none;
+    border-color: #667eea;
+}
+
 .file-name {
     font-weight: 500;
     color: #333;

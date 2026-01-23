@@ -4,7 +4,8 @@
 
 // ========== 全域變數 ==========
 let pdfFiles = [];
-let parsedQuestions = [];
+let parsedQuestions = []; // 所有題目的陣列
+let parsedQuestionsByFile = []; // 按檔案分組的題目 [{file, questions}, ...]
 let parser = null;
 let generator = null;
 
@@ -14,22 +15,31 @@ class PDFParser {
         this.questions = [];
     }
 
-    // 解析多個 PDF 檔案
+    // 解析多個 PDF 檔案（返回按檔案分組的結果）
     async parsePDFs(files) {
         this.questions = [];
+        const resultsByFile = [];
         
         for (let i = 0; i < files.length; i++) {
             const file = files[i];
             try {
                 const questions = await this.parseSinglePDF(file);
                 this.questions = this.questions.concat(questions);
+                resultsByFile.push({
+                    file: file,
+                    fileName: file.name,
+                    questions: questions
+                });
             } catch (error) {
                 console.error(`解析 ${file.name} 失敗:`, error);
                 throw new Error(`無法解析 ${file.name}: ${error.message}`);
             }
         }
         
-        return this.questions;
+        return {
+            allQuestions: this.questions,
+            byFile: resultsByFile
+        };
     }
 
     // 從 textContent.items 重建行（依 Y 座標分組）
@@ -779,6 +789,9 @@ const generateStatus = document.getElementById('generateStatus');
 // 初始化解析器
 parser = new PDFParser();
 
+// 初始化：確保按鈕狀態正確
+updateExportButton();
+
 // 上傳區域點擊事件
 uploadArea.addEventListener('click', () => {
     pdfInput.click();
@@ -809,6 +822,7 @@ pdfInput.addEventListener('change', (e) => {
 
 // 添加檔案
 function addFiles(files) {
+    console.log('PDF upload handler fired');
     files.forEach(file => {
         if (!pdfFiles.find(f => f.name === file.name && f.size === file.size)) {
             pdfFiles.push(file);
@@ -824,25 +838,72 @@ function addFiles(files) {
     }
 }
 
-// 更新檔案列表顯示
+// 更新檔案列表顯示（包含題目數量輸入框）
 function updateFileList() {
+    console.log('Per-file UI rendered');
     fileList.innerHTML = '';
-    pdfFiles.forEach((file, index) => {
-        const fileItem = document.createElement('div');
-        fileItem.className = 'file-item';
-        fileItem.innerHTML = `
-            <span class="file-name">${file.name}</span>
-            <button class="file-remove" onclick="removeFile(${index})">移除</button>
-        `;
-        fileList.appendChild(fileItem);
-    });
+    
+    // 如果有解析結果，顯示題目數量選擇
+    if (parsedQuestionsByFile.length > 0) {
+        // 添加標題
+        const titleDiv = document.createElement('div');
+        titleDiv.style.marginBottom = '15px';
+        titleDiv.style.fontWeight = 'bold';
+        titleDiv.style.color = '#555';
+        titleDiv.textContent = '選擇每個檔案的題目數量：';
+        fileList.appendChild(titleDiv);
+        
+        parsedQuestionsByFile.forEach((item, index) => {
+            const fileItem = document.createElement('div');
+            fileItem.className = 'file-item';
+            fileItem.innerHTML = `
+                <div style="flex: 1;">
+                    <span class="file-name">${item.fileName}</span>
+                    <span style="color: #888; font-size: 12px; margin-left: 10px;">（可用：${item.questions.length} 題）</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <label style="font-size: 14px; color: #555;">題目數：</label>
+                    <input type="number" 
+                           id="questionCount_${index}" 
+                           class="question-count-input" 
+                           min="0" 
+                           max="${item.questions.length}"
+                           step="1"
+                           value="0" 
+                           style="width: 60px; padding: 5px; border: 2px solid #ddd; border-radius: 4px; text-align: center;">
+                    <button class="file-remove" onclick="removeFile(${index})">移除</button>
+                </div>
+            `;
+            fileList.appendChild(fileItem);
+        });
+    } else {
+        // 如果還沒有解析結果，只顯示檔案名稱
+        pdfFiles.forEach((file, index) => {
+            const fileItem = document.createElement('div');
+            fileItem.className = 'file-item';
+            fileItem.innerHTML = `
+                <span class="file-name">${file.name}</span>
+                <button class="file-remove" onclick="removeFile(${index})">移除</button>
+            `;
+            fileList.appendChild(fileItem);
+        });
+    }
+    
+    // 更新生成按鈕狀態
+    updateExportButton();
 }
 
 // 移除檔案
 window.removeFile = function(index) {
     pdfFiles.splice(index, 1);
+    if (parsedQuestionsByFile.length > index) {
+        parsedQuestionsByFile.splice(index, 1);
+    }
     updateFileList();
     parsedQuestions = [];
+    if (pdfFiles.length === 0) {
+        parsedQuestionsByFile = [];
+    }
     parseSection.style.display = 'none';
     generateSection.style.display = 'none';
     
@@ -851,8 +912,35 @@ window.removeFile = function(index) {
         setTimeout(() => {
             parsePDFs();
         }, 500);
+    } else {
+        updateExportButton();
     }
 };
+
+// 更新生成按鈕的顯示狀態
+function updateExportButton() {
+    console.log('Export button rendered', {
+        hasFiles: pdfFiles.length > 0,
+        hasParsedData: parsedQuestionsByFile.length > 0
+    });
+    
+    const hasFiles = pdfFiles.length > 0;
+    const hasParsedData = parsedQuestionsByFile.length > 0;
+    
+    if (hasFiles && hasParsedData) {
+        generateSection.style.display = 'block';
+        generateBtn.disabled = false;
+        generateBtn.textContent = 'Generate & Download DOCX';
+    } else if (hasFiles) {
+        // 有檔案但還沒解析完成
+        generateSection.style.display = 'block';
+        generateBtn.disabled = true;
+        generateBtn.textContent = 'Generating & Download DOCX (解析中...)';
+    } else {
+        // 沒有檔案
+        generateSection.style.display = 'none';
+    }
+}
 
 // 解析 PDF
 async function parsePDFs() {
@@ -867,31 +955,46 @@ async function parsePDFs() {
     generateSection.style.display = 'none';
 
     try {
-        parsedQuestions = await parser.parsePDFs(pdfFiles);
+        const parseResult = await parser.parsePDFs(pdfFiles);
+        parsedQuestions = parseResult.allQuestions;
+        parsedQuestionsByFile = parseResult.byFile;
         
         if (parsedQuestions.length === 0) {
             parseStatus.innerHTML = '<div class="status error">未能從 PDF 中提取到任何 MC 題目。請確認 PDF 格式正確。</div>';
+            updateExportButton();
             return;
         }
 
-        // 顯示解析結果
+        // 顯示解析結果（按檔案分組）
         let infoHTML = `<h3>解析完成！</h3><ul>`;
         infoHTML += `<li>總共找到 <strong>${parsedQuestions.length}</strong> 題 MC 題目</li>`;
+        infoHTML += `<li>檔案數量：<strong>${parsedQuestionsByFile.length}</strong> 個</li>`;
+        parsedQuestionsByFile.forEach((item, index) => {
+            infoHTML += `<li>${item.fileName}: ${item.questions.length} 題</li>`;
+        });
         infoHTML += `</ul>`;
         parsedQuestionsDiv.innerHTML = infoHTML;
         
-        parseStatus.innerHTML = '<div class="status success">✓ PDF 解析成功！</div>';
-        generateSection.style.display = 'block';
+        // 更新檔案列表，顯示題目數量輸入框
+        updateFileList();
+        
+        parseStatus.innerHTML = '<div class="status success">✓ PDF 解析成功！請在上方為每個檔案設定要選擇的題目數。</div>';
+        
+        // 確保生成按鈕可見且啟用
+        updateExportButton();
         
     } catch (error) {
         parseStatus.innerHTML = `<div class="status error">解析失敗：${error.message}</div>`;
         console.error(error);
+        updateExportButton();
     }
 }
 
 // 生成試卷
 generateBtn.addEventListener('click', async () => {
-    if (parsedQuestions.length === 0) {
+    console.log('Export button clicked');
+    
+    if (parsedQuestionsByFile.length === 0) {
         generateStatus.innerHTML = '<div class="status error">請先上傳並解析 PDF 檔案</div>';
         return;
     }
@@ -912,16 +1015,47 @@ generateBtn.addEventListener('click', async () => {
     const questionFileName = `${safeExamName} - Questions.docx`;
     const answerFileName = `${safeExamName} - Answers.docx`;
     
-    const totalQuestions = parseInt(document.getElementById('totalQuestions').value, 10);
-    const chapterRatio = document.getElementById('chapterRatio').value;
+    // 從每個 PDF 獲取要選擇的題目數量
+    const questionCounts = [];
+    let totalSelected = 0;
+    let hasError = false;
+    let errorMessage = '';
 
-    if (totalQuestions <= 0) {
-        generateStatus.innerHTML = '<div class="status error">總題數必須大於 0</div>';
+    for (let i = 0; i < parsedQuestionsByFile.length; i++) {
+        const countInput = document.getElementById(`questionCount_${i}`);
+        const requestedCount = parseInt(countInput ? countInput.value : 0, 10) || 0;
+        const availableCount = parsedQuestionsByFile[i].questions.length;
+        
+        if (requestedCount < 0) {
+            hasError = true;
+            errorMessage = `${parsedQuestionsByFile[i].fileName}: 題目數不能為負數`;
+            break;
+        }
+        
+        if (requestedCount > availableCount) {
+            hasError = true;
+            errorMessage = `${parsedQuestionsByFile[i].fileName}: 請求 ${requestedCount} 題，但只有 ${availableCount} 題可用`;
+            break;
+        }
+        
+        questionCounts.push({
+            fileIndex: i,
+            fileName: parsedQuestionsByFile[i].fileName,
+            requestedCount: requestedCount,
+            availableCount: availableCount,
+            questions: parsedQuestionsByFile[i].questions
+        });
+        
+        totalSelected += requestedCount;
+    }
+
+    if (hasError) {
+        generateStatus.innerHTML = `<div class="status error">${errorMessage}</div>`;
         return;
     }
 
-    if (totalQuestions > parsedQuestions.length) {
-        generateStatus.innerHTML = `<div class="status error">總題數 (${totalQuestions}) 超過可用題目數 (${parsedQuestions.length})</div>`;
+    if (totalSelected === 0) {
+        generateStatus.innerHTML = '<div class="status error">請至少為一個檔案設定大於 0 的題目數</div>';
         return;
     }
 
@@ -931,9 +1065,26 @@ generateBtn.addEventListener('click', async () => {
     try {
         console.log('Export started');
         
-        // 生成題目
-        generator = new QuestionGenerator(parsedQuestions);
-        const examQuestions = generator.generateExam(totalQuestions, chapterRatio);
+        // 從每個 PDF 中分別隨機選擇指定數量的題目
+        const selectedQuestions = [];
+        const generator = new QuestionGenerator([]); // 用於打亂功能
+        
+        questionCounts.forEach((item, index) => {
+            if (item.requestedCount > 0) {
+                // 從該檔案的題目中隨機選擇
+                const shuffled = generator.shuffle([...item.questions]);
+                const selected = shuffled.slice(0, item.requestedCount);
+                selectedQuestions.push(...selected);
+            }
+        });
+        
+        // 打亂所有選中的題目順序
+        const examQuestions = generator.shuffle(selectedQuestions);
+        
+        // 重新編號
+        examQuestions.forEach((q, index) => {
+            q.examNumber = index + 1;
+        });
 
         // 生成 Word 文檔
         const wordGen = new WordGenerator();

@@ -29,13 +29,7 @@
                 <input type="text" id="examName" placeholder="例如：ACCT EXAM" value="ACCT EXAM">
             </div>
             <div class="form-group">
-                <label for="totalQuestions">總題數：</label>
-                <input type="number" id="totalQuestions" min="1" value="10">
-            </div>
-            <div class="form-group">
-                <label>章節配比（可選，例如：Ch2:5, Ch4:5）：</label>
-                <textarea id="chapterRatio" placeholder="Ch2:5&#10;Ch4:5&#10;Ch5:5" rows="5"></textarea>
-                <p class="hint">每行一個章節，格式：章節名稱:題數（不填則完全隨機）</p>
+                <p class="hint">請在上方檔案列表中為每個 PDF 設定要選擇的題目數量</p>
             </div>
         </section>
 
@@ -49,7 +43,7 @@
         <!-- 生成試卷 -->
         <section class="step" id="generateSection" style="display: none;">
             <h2>步驟 4：生成試卷</h2>
-            <button id="generateBtn" class="btn-primary">生成 Word 試卷</button>
+            <button id="generateBtn" class="btn-primary">Generate & Download DOCX</button>
             <div id="generateStatus" class="status"></div>
         </section>
     </div>
