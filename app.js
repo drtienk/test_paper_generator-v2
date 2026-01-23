@@ -1,5 +1,5 @@
 // ============================================
-// Cengage 隨機選擇題考卷產生器 - MVP
+// Managerial Accounting Test Generator - MVP
 // ============================================
 
 // ========== 全域變數 ==========
@@ -999,10 +999,10 @@ generateBtn.addEventListener('click', async () => {
         return;
     }
 
-    // 獲取考卷名稱，預設值為 "ACCT EXAM"
+    // 獲取考卷名稱，預設值為 "Managerial Accounting Test Generator"（使用者輸入優先）
     let examName = document.getElementById('examName').value.trim();
     if (!examName) {
-        examName = 'ACCT EXAM';
+        examName = 'Managerial Accounting Test Generator';
     }
     
     // 清理檔案名稱中的無效字元（保留空格）
