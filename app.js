@@ -891,7 +891,22 @@ generateBtn.addEventListener('click', async () => {
         return;
     }
 
-    const examName = document.getElementById('examName').value || '會計學測驗';
+    // 獲取考卷名稱，預設值為 "ACCT EXAM"
+    let examName = document.getElementById('examName').value.trim();
+    if (!examName) {
+        examName = 'ACCT EXAM';
+    }
+    
+    // 清理檔案名稱中的無效字元（保留空格）
+    const sanitizeFileName = (name) => {
+        // 移除 Windows 檔案系統不允許的字元：< > : " / \ | ? *
+        return name.replace(/[<>:"/\\|?*]/g, '');
+    };
+    
+    const safeExamName = sanitizeFileName(examName);
+    const questionFileName = `${safeExamName} - Questions.docx`;
+    const answerFileName = `${safeExamName} - Answers.docx`;
+    
     const totalQuestions = parseInt(document.getElementById('totalQuestions').value, 10);
     const chapterRatio = document.getElementById('chapterRatio').value;
 
@@ -909,6 +924,8 @@ generateBtn.addEventListener('click', async () => {
     generateBtn.disabled = true;
 
     try {
+        console.log('Export started');
+        
         // 生成題目
         generator = new QuestionGenerator(parsedQuestions);
         const examQuestions = generator.generateExam(totalQuestions, chapterRatio);
@@ -916,21 +933,31 @@ generateBtn.addEventListener('click', async () => {
         // 生成 Word 文檔
         const wordGen = new WordGenerator();
         
+        console.log('Generating Questions doc...');
         const questionBlob = await wordGen.generateQuestionSheet(examName, examQuestions);
-        wordGen.downloadFile(questionBlob, 'Exam_Questions.docx');
-
-        // 稍等一下再下載答案卷
-        setTimeout(async () => {
-            const answerBlob = await wordGen.generateAnswerSheet(examName, examQuestions);
-            wordGen.downloadFile(answerBlob, 'Exam_Answers.docx');
+        console.log('Questions doc generated');
+        
+        console.log('Generating Answers doc...');
+        const answerBlob = await wordGen.generateAnswerSheet(examName, examQuestions);
+        console.log('Answers doc generated');
+        
+        // 下載兩個檔案（分別下載，確保不會覆蓋）
+        console.log('Questions download triggered');
+        wordGen.downloadFile(questionBlob, questionFileName);
+        
+        // 稍等一下再下載答案卷，避免瀏覽器同時下載衝突
+        setTimeout(() => {
+            console.log('Answers download triggered');
+            wordGen.downloadFile(answerBlob, answerFileName);
+            console.log('Export completed');
             
             generateStatus.innerHTML = '<div class="status success">✓ 試卷生成成功！已下載題目卷和答案卷。</div>';
             generateBtn.disabled = false;
-        }, 500);
+        }, 300);
 
     } catch (error) {
+        console.error('Export failed:', error);
         generateStatus.innerHTML = `<div class="status error">生成失敗：${error.message}</div>`;
         generateBtn.disabled = false;
-        console.error(error);
     }
 });
