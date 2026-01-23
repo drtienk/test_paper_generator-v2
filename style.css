@@ -20,6 +20,35 @@ body {
     box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
 }
 
+.subject-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+}
+
+.subject-row label {
+    color: #555;
+    font-weight: 500;
+    font-size: 15px;
+}
+
+.subject-select {
+    padding: 8px 12px;
+    border: 2px solid #ddd;
+    border-radius: 5px;
+    font-size: 14px;
+    font-family: inherit;
+    min-width: 220px;
+    background: white;
+}
+
+.subject-select:focus {
+    outline: none;
+    border-color: #667eea;
+}
+
 h1 {
     color: #333;
     margin-bottom: 30px;

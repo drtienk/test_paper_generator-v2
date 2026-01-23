@@ -2,6 +2,23 @@
 // Managerial Accounting Test Generator - MVP
 // ============================================
 
+// ========== 科目設定（Subject / Course） ==========
+const SUBJECT_CONFIG = {
+    managerial: {
+        label: 'Managerial Accounting',
+        pageTitle: 'Managerial Accounting Test Generator',
+        defaultExamName: 'Managerial Accounting',
+        // parserRules: 暫時指向同一套
+    },
+    financial: {
+        label: 'Financial Accounting',
+        pageTitle: 'Financial Accounting Test Generator',
+        defaultExamName: 'Financial Accounting',
+        // parserRules: 暫時指向同一套（先一樣）
+    }
+};
+let currentSubject = 'managerial';
+
 // ========== 全域變數 ==========
 let pdfFiles = [];
 let parsedQuestions = []; // 所有題目的陣列
@@ -93,8 +110,9 @@ class PDFParser {
         return lines;
     }
 
-    // 解析單個 PDF
+    // 解析單個 PDF（currentSubject 供未來依科目套用不同 parserRules）
     async parseSinglePDF(file) {
+        const _subject = currentSubject; // 未來可依 _subject 套用不同正規化/過濾規則
         const arrayBuffer = await file.arrayBuffer();
         const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
         const questions = [];
@@ -776,6 +794,9 @@ class WordGenerator {
 
 // ========== 主應用程式邏輯 ==========
 // DOM 元素
+const subjectSelect = document.getElementById('subjectSelect');
+const mainTitle = document.getElementById('mainTitle');
+const examNameInput = document.getElementById('examName');
 const uploadArea = document.getElementById('uploadArea');
 const pdfInput = document.getElementById('pdfInput');
 const fileList = document.getElementById('fileList');
@@ -785,6 +806,31 @@ const parsedQuestionsDiv = document.getElementById('parsedQuestions');
 const generateSection = document.getElementById('generateSection');
 const generateBtn = document.getElementById('generateBtn');
 const generateStatus = document.getElementById('generateStatus');
+
+// 依 currentSubject 更新標題、<title>、考卷名稱預設（僅在未自訂或等於舊預設時更新）
+function applySubjectUI(prevSubject) {
+    const cfg = SUBJECT_CONFIG[currentSubject];
+    document.title = cfg.pageTitle;
+    mainTitle.textContent = cfg.pageTitle;
+    examNameInput.placeholder = '例如：' + cfg.defaultExamName;
+
+    const currentVal = (examNameInput.value || '').trim();
+    const shouldUpdateExamName = prevSubject == null ||
+        !currentVal ||
+        currentVal === (SUBJECT_CONFIG[prevSubject] && SUBJECT_CONFIG[prevSubject].defaultExamName);
+    if (shouldUpdateExamName) {
+        examNameInput.value = cfg.defaultExamName;
+    }
+}
+
+// 科目切換
+subjectSelect.value = currentSubject;
+applySubjectUI(null);
+subjectSelect.addEventListener('change', () => {
+    const prev = currentSubject;
+    currentSubject = subjectSelect.value;
+    applySubjectUI(prev);
+});
 
 // 初始化解析器
 parser = new PDFParser();
@@ -999,10 +1045,10 @@ generateBtn.addEventListener('click', async () => {
         return;
     }
 
-    // 獲取考卷名稱，預設值為 "Managerial Accounting Test Generator"（使用者輸入優先）
-    let examName = document.getElementById('examName').value.trim();
+    // 獲取考卷名稱（使用者輸入優先，否則用目前科目的 defaultExamName）
+    let examName = examNameInput.value.trim();
     if (!examName) {
-        examName = 'Managerial Accounting Test Generator';
+        examName = SUBJECT_CONFIG[currentSubject].defaultExamName;
     }
     
     // 清理檔案名稱中的無效字元（保留空格）

@@ -8,7 +8,14 @@
 </head>
 <body>
     <div class="container">
-        <h1>Managerial Accounting Test Generator</h1>
+        <div class="subject-row">
+            <label for="subjectSelect">Subject / Course：</label>
+            <select id="subjectSelect" class="subject-select">
+                <option value="managerial" selected>Managerial Accounting</option>
+                <option value="financial">Financial Accounting</option>
+            </select>
+        </div>
+        <h1 id="mainTitle">Managerial Accounting Test Generator</h1>
         
         <!--     上傳 PDF  -->
         <section class="step">
@@ -26,7 +33,7 @@
             <h2>步驟 2：設定出題規則</h2>
             <div class="form-group">
                 <label for="examName">考卷名稱：</label>
-                <input type="text" id="examName" placeholder="例如：Managerial Accounting Test Generator" value="Managerial Accounting Test Generator">
+                <input type="text" id="examName" placeholder="例如：Managerial Accounting" value="Managerial Accounting">
             </div>
             <div class="form-group">
                 <p class="hint">請在上方檔案列表中為每個 PDF 設定要選擇的題目數量</p>
