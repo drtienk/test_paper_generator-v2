@@ -538,10 +538,11 @@ class WordGenerator {
 
         // 答案列表（順序必須與題目卷一致）
         // 所有答案添加到同一個 section，讓 Word 自然處理分頁
+        // 使用相同的問題物件，確保與題目卷完全一致
         const answerChildren = [];
         
         questions.forEach((q, index) => {
-            // 題目編號和原始 ID
+            // 1. 題目編號和原始 ID
             answerChildren.push(
                 new docx.Paragraph({
                     children: [
@@ -551,16 +552,16 @@ class WordGenerator {
                             size: 24
                         })
                     ],
-                    spacing: { before: index === 0 ? 0 : 300, after: 200 }
+                    spacing: { before: index === 0 ? 0 : 300, after: 100 }
                 })
             );
             
-            // 正確答案
+            // 2. 完整題目文字（與題目卷相同）
             answerChildren.push(
                 new docx.Paragraph({
                     children: [
                         new docx.TextRun({
-                            text: `Correct Answer: ${q.correctOption.toUpperCase()}${q.hasCheckmark ? ' ✔' : ''}`,
+                            text: q.questionText,
                             size: 22
                         })
                     ],
@@ -568,7 +569,7 @@ class WordGenerator {
                 })
             );
 
-            // 顯示選項（保留原始 ✔/✓ 標記）
+            // 3. 所有選項（保留原始 ✔/✓ 標記，與題目卷相同的順序和文字）
             q.options.forEach(option => {
                 answerChildren.push(
                     new docx.Paragraph({
@@ -584,7 +585,21 @@ class WordGenerator {
                 );
             });
 
-            // 如果有 Feedback（只顯示在答案卷）
+            // 4. 正確答案標記
+            answerChildren.push(
+                new docx.Paragraph({
+                    children: [
+                        new docx.TextRun({
+                            text: `Correct Answer: ${q.correctOption.toUpperCase()}${q.hasCheckmark ? ' ✔' : ''}`,
+                            bold: true,
+                            size: 22
+                        })
+                    ],
+                    spacing: { before: 200, after: 200 }
+                })
+            );
+
+            // 5. Feedback（如果存在，只顯示在答案卷）
             if (q.feedbackText) {
                 answerChildren.push(
                     new docx.Paragraph({
@@ -595,7 +610,7 @@ class WordGenerator {
                                 size: 22
                             })
                         ],
-                        spacing: { before: 200, after: 100 }
+                        spacing: { before: 0, after: 100 }
                     }),
                     new docx.Paragraph({
                         children: [
