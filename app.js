@@ -352,35 +352,38 @@ class QuestionGenerator {
 class WordGenerator {
     // 生成題目卷（學生用）
     async generateQuestionSheet(examName, questions) {
-        const doc = new docx.Document({
-            sections: [{
-                properties: {},
+        // 所有內容將添加到同一個 section，確保連續流動
+        const allChildren = [];
+        
+        // 1. 標題
+        allChildren.push(
+            new docx.Paragraph({
                 children: [
-                    new docx.Paragraph({
-                        children: [
-                            new docx.TextRun({
-                                text: examName,
-                                bold: true,
-                                size: 32
-                            })
-                        ],
-                        alignment: docx.AlignmentType.CENTER,
-                        spacing: { after: 400 }
-                    }),
-                    new docx.Paragraph({
-                        children: [
-                            new docx.TextRun({
-                                text: `總題數：${questions.length} 題`
-                            })
-                        ],
-                        alignment: docx.AlignmentType.CENTER,
-                        spacing: { after: 600 }
+                    new docx.TextRun({
+                        text: examName,
+                        bold: true,
+                        size: 32
                     })
-                ]
-            }]
-        });
+                ],
+                alignment: docx.AlignmentType.CENTER,
+                spacing: { after: 400 }
+            })
+        );
+        
+        // 2. 總題數
+        allChildren.push(
+            new docx.Paragraph({
+                children: [
+                    new docx.TextRun({
+                        text: `總題數：${questions.length} 題`
+                    })
+                ],
+                alignment: docx.AlignmentType.CENTER,
+                spacing: { after: 600 }
+            })
+        );
 
-        // 作答表格（第一頁）
+        // 3. 作答表格
         const tableRows = [];
         const cols = 5; // 每行 5 題
         const rows = Math.ceil(questions.length / cols);
@@ -431,34 +434,34 @@ class WordGenerator {
             );
         }
 
-        doc.addSection({
-            properties: {},
-            children: [
-                new docx.Paragraph({
-                    children: [
-                        new docx.TextRun({
-                            text: '作答檢查表',
-                            bold: true,
-                            size: 24
-                        })
-                    ],
-                    spacing: { after: 200 }
-                }),
-                new docx.Table({
-                    rows: tableRows,
-                    width: { size: 100, type: docx.WidthType.PERCENTAGE }
-                }),
-                new docx.Paragraph({
-                    children: [],
-                    spacing: { after: 400 }
-                })
-            ]
-        });
-
-        // 題目內容（移除所有標記和原始 ID）
-        // 所有題目添加到同一個 section，讓 Word 自然處理分頁
-        const questionChildren = [];
+        allChildren.push(
+            new docx.Paragraph({
+                children: [
+                    new docx.TextRun({
+                        text: '作答檢查表',
+                        bold: true,
+                        size: 24
+                    })
+                ],
+                spacing: { after: 200 }
+            })
+        );
         
+        allChildren.push(
+            new docx.Table({
+                rows: tableRows,
+                width: { size: 100, type: docx.WidthType.PERCENTAGE }
+            })
+        );
+        
+        allChildren.push(
+            new docx.Paragraph({
+                children: [],
+                spacing: { after: 400 }
+            })
+        );
+
+        // 4. 題目內容（移除所有標記和原始 ID）
         questions.forEach((q, index) => {
             // 清理題目文字：移除附錄標籤和 (Algorithmic)（僅在題目卷中）
             // 移除 (Appendix...) 格式的標籤，包括 (Appendix 4B), (Appendix A) 等
@@ -469,7 +472,7 @@ class WordGenerator {
             cleanedQuestionText = cleanedQuestionText.trim().replace(/\s+/g, ' ');
             
             // 題目編號和文字（格式：1. 題目文字）
-            questionChildren.push(
+            allChildren.push(
                 new docx.Paragraph({
                     children: [
                         new docx.TextRun({
@@ -484,7 +487,7 @@ class WordGenerator {
             // 選項（移除 ✔ 和 ✓ 標記）
             q.options.forEach(option => {
                 const cleanOption = option.replace(/[✔✓]/g, '').trim();
-                questionChildren.push(
+                allChildren.push(
                     new docx.Paragraph({
                         children: [
                             new docx.TextRun({
@@ -499,10 +502,12 @@ class WordGenerator {
             });
         });
 
-        // 將所有題目添加到同一個 section
-        doc.addSection({
-            properties: {},
-            children: questionChildren
+        // 創建單一 section，包含所有內容（標題、表格、題目）
+        const doc = new docx.Document({
+            sections: [{
+                properties: {},
+                children: allChildren
+            }]
         });
 
         const blob = await docx.Packer.toBlob(doc);
