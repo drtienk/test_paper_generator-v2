@@ -530,10 +530,129 @@ class WordGenerator {
             }]
         });
 
+        // 答案摘要表格（在詳細題目之前）
+        const summaryTableRows = [];
+        
+        // 表頭
+        summaryTableRows.push(
+            new docx.TableRow({
+                children: [
+                    new docx.TableCell({
+                        children: [
+                            new docx.Paragraph({
+                                children: [
+                                    new docx.TextRun({
+                                        text: 'Question No.',
+                                        bold: true
+                                    })
+                                ],
+                                alignment: docx.AlignmentType.CENTER
+                            })
+                        ],
+                        shading: { fill: 'D3D3D3' }
+                    }),
+                    new docx.TableCell({
+                        children: [
+                            new docx.Paragraph({
+                                children: [
+                                    new docx.TextRun({
+                                        text: 'Answer',
+                                        bold: true
+                                    })
+                                ],
+                                alignment: docx.AlignmentType.CENTER
+                            })
+                        ],
+                        shading: { fill: 'D3D3D3' }
+                    })
+                ]
+            })
+        );
+        
+        // 表格內容（使用相同的問題順序）
+        questions.forEach((q, index) => {
+            summaryTableRows.push(
+                new docx.TableRow({
+                    children: [
+                        new docx.TableCell({
+                            children: [
+                                new docx.Paragraph({
+                                    children: [
+                                        new docx.TextRun({
+                                            text: `${index + 1}`,
+                                            size: 20
+                                        })
+                                    ],
+                                    alignment: docx.AlignmentType.CENTER
+                                })
+                            ]
+                        }),
+                        new docx.TableCell({
+                            children: [
+                                new docx.Paragraph({
+                                    children: [
+                                        new docx.TextRun({
+                                            text: q.correctOption.toUpperCase(),
+                                            size: 20
+                                        })
+                                    ],
+                                    alignment: docx.AlignmentType.CENTER
+                                })
+                            ]
+                        })
+                    ]
+                })
+            );
+        });
+
         // 答案列表（順序必須與題目卷一致）
         // 所有答案添加到同一個 section，讓 Word 自然處理分頁
         // 使用相同的問題物件，確保與題目卷完全一致
         const answerChildren = [];
+        
+        // 添加摘要表格標題
+        answerChildren.push(
+            new docx.Paragraph({
+                children: [
+                    new docx.TextRun({
+                        text: 'Answer Summary',
+                        bold: true,
+                        size: 24
+                    })
+                ],
+                spacing: { after: 200 }
+            })
+        );
+        
+        // 添加摘要表格
+        answerChildren.push(
+            new docx.Table({
+                rows: summaryTableRows,
+                width: { size: 50, type: docx.WidthType.PERCENTAGE }
+            })
+        );
+        
+        // 添加分隔
+        answerChildren.push(
+            new docx.Paragraph({
+                children: [],
+                spacing: { after: 400 }
+            })
+        );
+        
+        // 添加詳細答案標題
+        answerChildren.push(
+            new docx.Paragraph({
+                children: [
+                    new docx.TextRun({
+                        text: 'Detailed Answers',
+                        bold: true,
+                        size: 24
+                    })
+                ],
+                spacing: { after: 200 }
+            })
+        );
         
         questions.forEach((q, index) => {
             // 1. 題目編號和文字（格式：1. 題目文字，與題目卷相同）
