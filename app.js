@@ -460,12 +460,20 @@ class WordGenerator {
         const questionChildren = [];
         
         questions.forEach((q, index) => {
+            // 清理題目文字：移除附錄標籤和 (Algorithmic)（僅在題目卷中）
+            // 移除 (Appendix...) 格式的標籤，包括 (Appendix 4B), (Appendix A) 等
+            let cleanedQuestionText = q.questionText.replace(/\(Appendix[^)]*\)/gi, '');
+            // 移除 (Algorithmic) 標籤
+            cleanedQuestionText = cleanedQuestionText.replace(/\(Algorithmic\)/gi, '');
+            // 清理可能留下的多餘空格
+            cleanedQuestionText = cleanedQuestionText.trim().replace(/\s+/g, ' ');
+            
             // 題目編號和文字（格式：1. 題目文字）
             questionChildren.push(
                 new docx.Paragraph({
                     children: [
                         new docx.TextRun({
-                            text: `${index + 1}. ${q.questionText}`,
+                            text: `${index + 1}. ${cleanedQuestionText}`,
                             size: 22
                         })
                     ],
