@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cengage 隨機選擇題考卷產生器</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>📘 Cengage 隨機選擇題考卷產生器</h1>
+        
+        <!-- 上傳 PDF -->
+        <section class="step">
+            <h2>步驟 1：上傳 PDF 檔案</h2>
+            <div class="upload-area" id="uploadArea">
+                <p>點擊或拖放 PDF 檔案到此處</p>
+                <p class="hint">可一次上傳多個檔案（每個 PDF 對應一個章節）</p>
+                <input type="file" id="pdfInput" multiple accept=".pdf" style="display: none;">
+            </div>
+            <div id="fileList" class="file-list"></div>
+        </section>
+
+        <!-- 設定出題規則 -->
+        <section class="step">
+            <h2>步驟 2：設定出題規則</h2>
+            <div class="form-group">
+                <label for="examName">考卷名稱：</label>
+                <input type="text" id="examName" placeholder="例如：會計學期中測驗" value="會計學測驗">
+            </div>
+            <div class="form-group">
+                <label for="totalQuestions">總題數：</label>
+                <input type="number" id="totalQuestions" min="1" value="10">
+            </div>
+            <div class="form-group">
+                <label>章節配比（可選，例如：Ch2:5, Ch4:5）：</label>
+                <textarea id="chapterRatio" placeholder="Ch2:5&#10;Ch4:5&#10;Ch5:5" rows="5"></textarea>
+                <p class="hint">每行一個章節，格式：章節名稱:題數（不填則完全隨機）</p>
+            </div>
+        </section>
+
+        <!-- 解析狀態 -->
+        <section class="step" id="parseSection" style="display: none;">
+            <h2>步驟 3：解析 PDF</h2>
+            <div id="parseStatus" class="status"></div>
+            <div id="parsedQuestions" class="parsed-info"></div>
+        </section>
+
+        <!-- 生成試卷 -->
+        <section class="step" id="generateSection" style="display: none;">
+            <h2>步驟 4：生成試卷</h2>
+            <button id="generateBtn" class="btn-primary">生成 Word 試卷</button>
+            <div id="generateStatus" class="status"></div>
+        </section>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script>
+        // 設定 pdf.js worker
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
