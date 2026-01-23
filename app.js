@@ -456,8 +456,12 @@ class WordGenerator {
         });
 
         // 題目內容（移除所有標記和原始 ID）
+        // 所有題目添加到同一個 section，讓 Word 自然處理分頁
+        const questionChildren = [];
+        
         questions.forEach((q, index) => {
-            const children = [
+            // 題目編號
+            questionChildren.push(
                 new docx.Paragraph({
                     children: [
                         new docx.TextRun({
@@ -466,8 +470,12 @@ class WordGenerator {
                             size: 22
                         })
                     ],
-                    spacing: { before: 300, after: 100 }
-                }),
+                    spacing: { before: index === 0 ? 0 : 300, after: 100 }
+                })
+            );
+            
+            // 題目文字
+            questionChildren.push(
                 new docx.Paragraph({
                     children: [
                         new docx.TextRun({
@@ -477,12 +485,12 @@ class WordGenerator {
                     ],
                     spacing: { after: 200 }
                 })
-            ];
+            );
 
             // 選項（移除 ✔ 和 ✓ 標記）
             q.options.forEach(option => {
                 const cleanOption = option.replace(/[✔✓]/g, '').trim();
-                children.push(
+                questionChildren.push(
                     new docx.Paragraph({
                         children: [
                             new docx.TextRun({
@@ -495,11 +503,12 @@ class WordGenerator {
                     })
                 );
             });
+        });
 
-            doc.addSection({
-                properties: {},
-                children: children
-            });
+        // 將所有題目添加到同一個 section
+        doc.addSection({
+            properties: {},
+            children: questionChildren
         });
 
         const blob = await docx.Packer.toBlob(doc);
@@ -528,8 +537,12 @@ class WordGenerator {
         });
 
         // 答案列表（順序必須與題目卷一致）
+        // 所有答案添加到同一個 section，讓 Word 自然處理分頁
+        const answerChildren = [];
+        
         questions.forEach((q, index) => {
-            const children = [
+            // 題目編號和原始 ID
+            answerChildren.push(
                 new docx.Paragraph({
                     children: [
                         new docx.TextRun({
@@ -538,8 +551,12 @@ class WordGenerator {
                             size: 24
                         })
                     ],
-                    spacing: { before: 300, after: 200 }
-                }),
+                    spacing: { before: index === 0 ? 0 : 300, after: 200 }
+                })
+            );
+            
+            // 正確答案
+            answerChildren.push(
                 new docx.Paragraph({
                     children: [
                         new docx.TextRun({
@@ -549,11 +566,11 @@ class WordGenerator {
                     ],
                     spacing: { after: 200 }
                 })
-            ];
+            );
 
             // 顯示選項（保留原始 ✔/✓ 標記）
             q.options.forEach(option => {
-                children.push(
+                answerChildren.push(
                     new docx.Paragraph({
                         children: [
                             new docx.TextRun({
@@ -569,7 +586,7 @@ class WordGenerator {
 
             // 如果有 Feedback（只顯示在答案卷）
             if (q.feedbackText) {
-                children.push(
+                answerChildren.push(
                     new docx.Paragraph({
                         children: [
                             new docx.TextRun({
@@ -592,11 +609,12 @@ class WordGenerator {
                     })
                 );
             }
+        });
 
-            doc.addSection({
-                properties: {},
-                children: children
-            });
+        // 將所有答案添加到同一個 section
+        doc.addSection({
+            properties: {},
+            children: answerChildren
         });
 
         const blob = await docx.Packer.toBlob(doc);
