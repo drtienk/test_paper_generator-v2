@@ -460,30 +460,16 @@ class WordGenerator {
         const questionChildren = [];
         
         questions.forEach((q, index) => {
-            // 題目編號
+            // 題目編號和文字（格式：1. 題目文字）
             questionChildren.push(
                 new docx.Paragraph({
                     children: [
                         new docx.TextRun({
-                            text: `Question ${index + 1}`,
-                            bold: true,
+                            text: `${index + 1}. ${q.questionText}`,
                             size: 22
                         })
                     ],
-                    spacing: { before: index === 0 ? 0 : 300, after: 100 }
-                })
-            );
-            
-            // 題目文字
-            questionChildren.push(
-                new docx.Paragraph({
-                    children: [
-                        new docx.TextRun({
-                            text: q.questionText,
-                            size: 22
-                        })
-                    ],
-                    spacing: { after: 200 }
+                    spacing: { before: index === 0 ? 0 : 300, after: 200 }
                 })
             );
 
@@ -542,27 +528,27 @@ class WordGenerator {
         const answerChildren = [];
         
         questions.forEach((q, index) => {
-            // 1. 題目編號和原始 ID
+            // 1. 題目編號和文字（格式：1. 題目文字，與題目卷相同）
             answerChildren.push(
                 new docx.Paragraph({
                     children: [
                         new docx.TextRun({
-                            text: `Question ${index + 1} (Original: ${q.originalId})`,
-                            bold: true,
-                            size: 24
+                            text: `${index + 1}. ${q.questionText}`,
+                            size: 22
                         })
                     ],
                     spacing: { before: index === 0 ? 0 : 300, after: 100 }
                 })
             );
             
-            // 2. 完整題目文字（與題目卷相同）
+            // 2. 原始 ID（在題目文字下方）
             answerChildren.push(
                 new docx.Paragraph({
                     children: [
                         new docx.TextRun({
-                            text: q.questionText,
-                            size: 22
+                            text: `(Original: ${q.originalId})`,
+                            size: 18,
+                            italics: true
                         })
                     ],
                     spacing: { after: 200 }
