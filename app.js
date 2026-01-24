@@ -124,6 +124,7 @@ class PDFParser {
             return await this.parseFinancialByPage(pdf, file);
         }
 
+        // 以下是原有 Managerial 邏輯，完全不要動
         const questions = [];
         let allLines = [];
         for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
@@ -140,7 +141,7 @@ class PDFParser {
 
     async parseFinancialByPage(pdfDoc, fileMeta) {
         const questions = [];
-        const fileBaseName = ((fileMeta && fileMeta.name) || 'FA').replace(/\.pdf$/i, '');
+        const fileBaseName = (fileMeta && fileMeta.name ? fileMeta.name : 'FA').replace(/\.pdf$/i, '');
 
         console.log('[Financial] 開始解析: ' + fileBaseName + ', 共 ' + pdfDoc.numPages + ' 頁');
 
@@ -149,7 +150,7 @@ class PDFParser {
                 const page = await pdfDoc.getPage(pageNum);
                 const textContent = await page.getTextContent();
                 const rawLines = this.reconstructLines(textContent.items);
-                const lines = rawLines.map(function (l) { return (l || '').trim(); }).filter(function (l) { return l.length > 0; });
+                const lines = rawLines.map(function(l) { return (l || '').trim(); }).filter(function(l) { return l.length > 0; });
 
                 const q = this.parseFinancialOnePage(lines, pageNum, fileBaseName);
 
@@ -169,78 +170,105 @@ class PDFParser {
     }
 
     parseFinancialOnePage(lines, pageNum, fileBaseName) {
-        const CIRCLE = '\uEA56';
-        const ARROW = '\uEA57';
+        var CIRCLE = '\uEA56';
+        var ARROW = '\uEA57';
 
-        const awardPattern = /^\d+\.\s*Award:\s*\d+(\.\d+)?\s*point(s)?/i;
-        let awardIdx = -1;
-        for (let i = 0; i < lines.length; i++) {
+        var awardPattern = /^\d+\.\s*Award:\s*\d+(\.\d+)?\s*point(s)?/i;
+        var awardIdx = -1;
+        for (var i = 0; i < lines.length; i++) {
             if (awardPattern.test(lines[i])) {
                 awardIdx = i;
                 break;
             }
         }
-        if (awardIdx < 0) return null;
 
-        const content = lines.slice(awardIdx + 1);
-        let endIdx = -1;
-        for (let i = 0; i < content.length; i++) {
+        if (awardIdx < 0) {
+            console.warn('[Financial][' + fileBaseName + '][p' + pageNum + '] 未找到 Award 行');
+            return null;
+        }
+
+        var content = lines.slice(awardIdx + 1);
+
+        var endIdx = content.length;
+        for (var i = 0; i < content.length; i++) {
             if (/^References$/i.test(content[i]) || /^Multiple Choice/i.test(content[i])) {
                 endIdx = i;
                 break;
             }
         }
-        if (endIdx < 0) endIdx = content.length;
-        const questionContent = content.slice(0, endIdx);
 
-        const questionLines = [];
-        const optionLines = [];
-        let foundFirstOption = false;
+        var questionContent = content.slice(0, endIdx);
 
-        for (let i = 0; i < questionContent.length; i++) {
-            const line = questionContent[i];
-            if (line.indexOf(CIRCLE) >= 0) {
+        var questionLines = [];
+        var optionLines = [];
+        var foundFirstOption = false;
+
+        for (var i = 0; i < questionContent.length; i++) {
+            var line = questionContent[i];
+            if (line.indexOf(CIRCLE) !== -1) {
                 foundFirstOption = true;
-                if (optionLines.length < 4) optionLines.push(line);
+                if (optionLines.length < 4) {
+                    optionLines.push(line);
+                }
             } else if (!foundFirstOption) {
                 questionLines.push(line);
             }
         }
 
-        const options = [];
-        let answerIndex = -1;
+        var options = [];
+        var answerIndex = -1;
 
-        for (let i = 0; i < optionLines.length; i++) {
-            let optText = optionLines[i];
-            if (optText.indexOf(ARROW) >= 0) answerIndex = i;
+        for (var i = 0; i < optionLines.length; i++) {
+            var optText = optionLines[i];
+
+            if (optText.indexOf(ARROW) !== -1) {
+                answerIndex = i;
+            }
+
             optText = optText.split(CIRCLE).join('');
             optText = optText.split(ARROW).join('');
             optText = optText.trim();
-            const letter = String.fromCharCode(97 + i);
-            options.push(answerIndex === i ? letter + '. ' + optText + ' ✔' : letter + '. ' + optText);
+
+            var letter = String.fromCharCode(97 + i);
+            options.push(letter + '. ' + optText);
         }
 
-        if (options.length < 3) return null;
-
-        let lastOptionIdx = -1;
-        for (let i = 0; i < questionContent.length; i++) {
-            if (questionContent[i].indexOf(CIRCLE) >= 0) lastOptionIdx = i;
+        if (options.length < 3) {
+            console.warn('[Financial][' + fileBaseName + '][p' + pageNum + '] 選項不足: ' + options.length);
+            return null;
         }
 
-        const feedbackLines = [];
-        if (lastOptionIdx >= 0) {
-            for (let i = lastOptionIdx + 1; i < questionContent.length; i++) {
-                const line = questionContent[i].trim();
-                if (line && line.indexOf(CIRCLE) < 0 && line.indexOf(ARROW) < 0) feedbackLines.push(line);
+        if (answerIndex < 0) {
+            console.warn('[Financial][' + fileBaseName + '][p' + pageNum + '] 未找到正確答案標記（箭頭）');
+            return null;
+        }
+
+        var lastOptionIdx = -1;
+        for (var i = 0; i < questionContent.length; i++) {
+            if (questionContent[i].indexOf(CIRCLE) !== -1) {
+                lastOptionIdx = i;
             }
         }
-        const feedbackText = feedbackLines.join(' ').trim();
 
-        const questionText = questionLines.join(' ').replace(/\s+/g, ' ').trim();
-        if (!questionText) return null;
+        var feedbackLines = [];
+        if (lastOptionIdx >= 0) {
+            for (var i = lastOptionIdx + 1; i < questionContent.length; i++) {
+                var line = questionContent[i].trim();
+                if (line && line.indexOf(CIRCLE) === -1 && line.indexOf(ARROW) === -1) {
+                    feedbackLines.push(line);
+                }
+            }
+        }
+        var feedbackText = feedbackLines.join(' ').trim();
 
-        if (answerIndex < 0) answerIndex = 0;
-        const correctLetter = String.fromCharCode(97 + answerIndex);
+        var questionText = questionLines.join(' ').replace(/\s+/g, ' ').trim();
+
+        if (!questionText) {
+            console.warn('[Financial][' + fileBaseName + '][p' + pageNum + '] 題幹為空');
+            return null;
+        }
+
+        var correctLetter = String.fromCharCode(97 + answerIndex);
 
         return {
             originalId: fileBaseName + '-p' + pageNum,
@@ -626,8 +654,8 @@ class WordGenerator {
             );
 
             // 選項（移除 ✔ 和 ✓ 標記）
-            q.options.forEach(option => {
-                const cleanOption = option.replace(/[✔✓]/g, '').trim();
+            q.options.forEach(function(option) {
+                var cleanOption = option.replace(/[✔✓]/g, '').trim();
                 allChildren.push(
                     new docx.Paragraph({
                         children: [
@@ -827,13 +855,16 @@ class WordGenerator {
                 })
             );
 
-            // 3. 所有選項（保留原始 ✔/✓ 標記，與題目卷相同的順序和文字）
-            q.options.forEach(option => {
+            // 3. 所有選項（正確答案顯示 ✔）
+            q.options.forEach(function(option, optIndex) {
+                var letter = String.fromCharCode(97 + optIndex);
+                var isCorrect = (letter === q.correctOption);
+                var displayOption = isCorrect ? option + ' ✔' : option;
                 answerChildren.push(
                     new docx.Paragraph({
                         children: [
                             new docx.TextRun({
-                                text: option,
+                                text: displayOption,
                                 size: 20
                             })
                         ],
@@ -1119,7 +1150,7 @@ async function parsePDFs() {
         parsedQuestionsByFile = parseResult.byFile;
         
         if (parsedQuestions.length === 0) {
-            const msg = currentSubject === 'financial'
+            var msg = currentSubject === 'financial'
                 ? '未能從 PDF 中提取到任何 Financial 題目（請確認為 McGraw-Hill Connect Print View 格式）。'
                 : '未能從 PDF 中提取到任何 MC 題目。請確認 PDF 格式正確。';
             parseStatus.innerHTML = '<div class="status error">' + msg + '</div>';
