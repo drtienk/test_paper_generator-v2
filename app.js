@@ -28,6 +28,11 @@ let generator = null;
 
 // ========== PDF 解析器類別 ==========
 class PDFParser {
+    static FINANCIAL_SYMBOLS = {
+        CIRCLE: '\uEA56',
+        ARROW: '\uEA57',
+    };
+
     constructor() {
         this.questions = [];
     }
@@ -110,33 +115,141 @@ class PDFParser {
         return lines;
     }
 
-    // 解析單個 PDF（currentSubject 供未來依科目套用不同 parserRules）
+    // 解析單個 PDF（依 currentSubject 分派 Financial / Managerial）
     async parseSinglePDF(file) {
-        const _subject = currentSubject; // 未來可依 _subject 套用不同正規化/過濾規則
         const arrayBuffer = await file.arrayBuffer();
         const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-        const questions = [];
-        
-        let allLines = [];
 
-        // 讀取所有頁面
+        if (currentSubject === 'financial') {
+            return await this.parseFinancialByPage(pdf, file);
+        }
+
+        const questions = [];
+        let allLines = [];
         for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
             const page = await pdf.getPage(pageNum);
             const textContent = await page.getTextContent();
-            
-            // 使用行重建方法
             const pageLines = this.reconstructLines(textContent.items);
             allLines = allLines.concat(pageLines);
         }
-        
-        // 將所有行合併成文字進行解析
         const fullText = allLines.join('\n');
-        
-        // 從文字中提取題目
         const extractedQuestions = this.extractQuestionsFromText(fullText);
         questions.push(...extractedQuestions);
-        
         return questions;
+    }
+
+    async parseFinancialByPage(pdfDoc, fileMeta) {
+        const questions = [];
+        const fileBaseName = ((fileMeta && fileMeta.name) || 'FA').replace(/\.pdf$/i, '');
+
+        console.log('[Financial] 開始解析: ' + fileBaseName + ', 共 ' + pdfDoc.numPages + ' 頁');
+
+        for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
+            try {
+                const page = await pdfDoc.getPage(pageNum);
+                const textContent = await page.getTextContent();
+                const rawLines = this.reconstructLines(textContent.items);
+                const lines = rawLines.map(function (l) { return (l || '').trim(); }).filter(function (l) { return l.length > 0; });
+
+                const q = this.parseFinancialOnePage(lines, pageNum, fileBaseName);
+
+                if (q) {
+                    questions.push(q);
+                    console.log('[Financial][' + fileBaseName + '][p' + pageNum + '] ✓ opts=' + q.options.length + ', answer=' + q.correctOption);
+                } else {
+                    console.warn('[Financial][' + fileBaseName + '][p' + pageNum + '] ✗ 未解析出題目');
+                }
+            } catch (e) {
+                console.error('[Financial][' + fileBaseName + '][p' + pageNum + '] 異常:', e.message);
+            }
+        }
+
+        console.log('[Financial] ' + fileBaseName + ': 總共 ' + questions.length + ' 題');
+        return questions;
+    }
+
+    parseFinancialOnePage(lines, pageNum, fileBaseName) {
+        const CIRCLE = '\uEA56';
+        const ARROW = '\uEA57';
+
+        const awardPattern = /^\d+\.\s*Award:\s*\d+(\.\d+)?\s*point(s)?/i;
+        let awardIdx = -1;
+        for (let i = 0; i < lines.length; i++) {
+            if (awardPattern.test(lines[i])) {
+                awardIdx = i;
+                break;
+            }
+        }
+        if (awardIdx < 0) return null;
+
+        const content = lines.slice(awardIdx + 1);
+        let endIdx = -1;
+        for (let i = 0; i < content.length; i++) {
+            if (/^References$/i.test(content[i]) || /^Multiple Choice/i.test(content[i])) {
+                endIdx = i;
+                break;
+            }
+        }
+        if (endIdx < 0) endIdx = content.length;
+        const questionContent = content.slice(0, endIdx);
+
+        const questionLines = [];
+        const optionLines = [];
+        let foundFirstOption = false;
+
+        for (let i = 0; i < questionContent.length; i++) {
+            const line = questionContent[i];
+            if (line.indexOf(CIRCLE) >= 0) {
+                foundFirstOption = true;
+                if (optionLines.length < 4) optionLines.push(line);
+            } else if (!foundFirstOption) {
+                questionLines.push(line);
+            }
+        }
+
+        const options = [];
+        let answerIndex = -1;
+
+        for (let i = 0; i < optionLines.length; i++) {
+            let optText = optionLines[i];
+            if (optText.indexOf(ARROW) >= 0) answerIndex = i;
+            optText = optText.split(CIRCLE).join('');
+            optText = optText.split(ARROW).join('');
+            optText = optText.trim();
+            const letter = String.fromCharCode(97 + i);
+            options.push(answerIndex === i ? letter + '. ' + optText + ' ✔' : letter + '. ' + optText);
+        }
+
+        if (options.length < 3) return null;
+
+        let lastOptionIdx = -1;
+        for (let i = 0; i < questionContent.length; i++) {
+            if (questionContent[i].indexOf(CIRCLE) >= 0) lastOptionIdx = i;
+        }
+
+        const feedbackLines = [];
+        if (lastOptionIdx >= 0) {
+            for (let i = lastOptionIdx + 1; i < questionContent.length; i++) {
+                const line = questionContent[i].trim();
+                if (line && line.indexOf(CIRCLE) < 0 && line.indexOf(ARROW) < 0) feedbackLines.push(line);
+            }
+        }
+        const feedbackText = feedbackLines.join(' ').trim();
+
+        const questionText = questionLines.join(' ').replace(/\s+/g, ' ').trim();
+        if (!questionText) return null;
+
+        if (answerIndex < 0) answerIndex = 0;
+        const correctLetter = String.fromCharCode(97 + answerIndex);
+
+        return {
+            originalId: fileBaseName + '-p' + pageNum,
+            questionText: questionText,
+            options: options,
+            correctOption: correctLetter,
+            hasCheckmark: true,
+            feedbackText: feedbackText
+        };
     }
 
     // 從文字中提取題目
@@ -1006,7 +1119,10 @@ async function parsePDFs() {
         parsedQuestionsByFile = parseResult.byFile;
         
         if (parsedQuestions.length === 0) {
-            parseStatus.innerHTML = '<div class="status error">未能從 PDF 中提取到任何 MC 題目。請確認 PDF 格式正確。</div>';
+            const msg = currentSubject === 'financial'
+                ? '未能從 PDF 中提取到任何 Financial 題目（請確認為 McGraw-Hill Connect Print View 格式）。'
+                : '未能從 PDF 中提取到任何 MC 題目。請確認 PDF 格式正確。';
+            parseStatus.innerHTML = '<div class="status error">' + msg + '</div>';
             updateExportButton();
             return;
         }
