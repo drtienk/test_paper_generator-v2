@@ -689,99 +689,56 @@ class WordGenerator {
                 spacing: { after: 400 }
             })
         );
-        
-        // 2. 總題數
-        allChildren.push(
-            new docx.Paragraph({
-                children: [
-                    new docx.TextRun({
-                        text: `總題數：${questions.length} 題`
-                    })
-                ],
-                alignment: docx.AlignmentType.CENTER,
-                spacing: { after: 600 }
-            })
-        );
 
-        // 3. 作答表格
-        const tableRows = [];
-        const cols = 5; // 每行 5 題
-        const rows = Math.ceil(questions.length / cols);
-        
-        for (let row = 0; row < rows; row++) {
-            const cells = [];
-            for (let col = 0; col < cols; col++) {
-                const index = row * cols + col;
-                if (index < questions.length) {
-                    cells.push(
-                        new docx.TableCell({
-                            children: [
-                                new docx.Paragraph({
-                                    children: [
-                                        new docx.TextRun({
-                                            text: `${index + 1}`,
-                                            size: 18
-                                        })
-                                    ],
-                                    alignment: docx.AlignmentType.CENTER
-                                }),
-                                new docx.Paragraph({
-                                    children: [
-                                        new docx.TextRun({
-                                            text: '⬜',
-                                            size: 20
-                                        })
-                                    ],
-                                    alignment: docx.AlignmentType.CENTER
-                                })
-                            ],
-                            width: { size: 20, type: docx.WidthType.PERCENTAGE }
-                        })
-                    );
-                } else {
-                    cells.push(
-                        new docx.TableCell({
-                            children: [],
-                            width: { size: 20, type: docx.WidthType.PERCENTAGE }
-                        })
-                    );
-                }
-            }
-            tableRows.push(
-                new docx.TableRow({
-                    children: cells
+        // 總題數／作答檢查表／勾選格表：僅 Financial 保留；Managerial 已有封面作答格，題目頁不再重複
+        if (currentSubject !== 'managerial') {
+            allChildren.push(
+                new docx.Paragraph({
+                    children: [new docx.TextRun({ text: `總題數：${questions.length} 題` })],
+                    alignment: docx.AlignmentType.CENTER,
+                    spacing: { after: 600 }
                 })
             );
+            const cols = 5;
+            const rows = Math.ceil(questions.length / cols);
+            const tableRows = [];
+            for (let row = 0; row < rows; row++) {
+                const cells = [];
+                for (let col = 0; col < cols; col++) {
+                    const index = row * cols + col;
+                    if (index < questions.length) {
+                        cells.push(
+                            new docx.TableCell({
+                                children: [
+                                    new docx.Paragraph({
+                                        children: [new docx.TextRun({ text: `${index + 1}`, size: 18 })],
+                                        alignment: docx.AlignmentType.CENTER
+                                    }),
+                                    new docx.Paragraph({
+                                        children: [new docx.TextRun({ text: '⬜', size: 20 })],
+                                        alignment: docx.AlignmentType.CENTER
+                                    })
+                                ],
+                                width: { size: 20, type: docx.WidthType.PERCENTAGE }
+                            })
+                        );
+                    } else {
+                        cells.push(new docx.TableCell({ children: [], width: { size: 20, type: docx.WidthType.PERCENTAGE } }));
+                    }
+                }
+                tableRows.push(new docx.TableRow({ children: cells }));
+            }
+            allChildren.push(
+                new docx.Paragraph({
+                    children: [new docx.TextRun({ text: '作答檢查表', bold: true, size: 24 })],
+                    spacing: { after: 200 }
+                })
+            );
+            allChildren.push(new docx.Table({ rows: tableRows, width: { size: 100, type: docx.WidthType.PERCENTAGE } }));
+            allChildren.push(new docx.Paragraph({ children: [], spacing: { after: 400 } }));
         }
 
-        allChildren.push(
-            new docx.Paragraph({
-                children: [
-                    new docx.TextRun({
-                        text: '作答檢查表',
-                        bold: true,
-                        size: 24
-                    })
-                ],
-                spacing: { after: 200 }
-            })
-        );
-        
-        allChildren.push(
-            new docx.Table({
-                rows: tableRows,
-                width: { size: 100, type: docx.WidthType.PERCENTAGE }
-            })
-        );
-        
-        allChildren.push(
-            new docx.Paragraph({
-                children: [],
-                spacing: { after: 400 }
-            })
-        );
-
-        // 4. 題目內容（移除所有標記和原始 ID）
+        // 題目內容（移除所有標記和原始 ID）
         questions.forEach((q, index) => {
             // 清理題目文字：移除附錄標籤和 (Algorithmic)（僅在題目卷中）
             // 移除 (Appendix...) 格式的標籤，包括 (Appendix 4B), (Appendix A) 等
