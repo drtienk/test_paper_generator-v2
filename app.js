@@ -519,10 +519,161 @@ class QuestionGenerator {
 
 // ========== Word 文檔生成器類別 ==========
 class WordGenerator {
+    // Managerial 專用：產生封面頁元素（含答案格），傳入題目總數以決定格數
+    _buildManagerialCoverPage(questionCount) {
+        const out = [];
+        const borderOption = (typeof docx.BorderStyle !== 'undefined')
+            ? { style: docx.BorderStyle.SINGLE, size: 4 }
+            : { size: 4 };
+
+        out.push(
+            new docx.Paragraph({
+                children: [new docx.TextRun({ text: 'Managerial Accounting (ACCT 201)', bold: true, size: 28 })],
+                alignment: docx.AlignmentType.CENTER,
+                spacing: { after: 120 }
+            }),
+            new docx.Paragraph({
+                children: [new docx.TextRun({ text: 'Department of Accounting and ISA', size: 22 })],
+                alignment: docx.AlignmentType.CENTER,
+                spacing: { after: 80 }
+            }),
+            new docx.Paragraph({
+                children: [new docx.TextRun({ text: 'Shippensburg University', size: 22 })],
+                alignment: docx.AlignmentType.CENTER,
+                spacing: { after: 80 }
+            }),
+            new docx.Paragraph({
+                children: [new docx.TextRun({ text: 'Spring 2025 – Exam 2', size: 22 })],
+                alignment: docx.AlignmentType.CENTER,
+                spacing: { after: 320 }
+            }),
+            new docx.Paragraph({
+                children: [new docx.TextRun({ text: 'Section: ___________        Name: __________________________', size: 22 })],
+                spacing: { after: 320 }
+            }),
+            new docx.Paragraph({
+                children: [new docx.TextRun({
+                    text: '• For open-ended questions, you must show all supporting calculations in an ORGANIZED way to be eligible to receive total credit. If not, you\'ll not get partial credit.',
+                    size: 20
+                })],
+                spacing: { after: 120 }
+            }),
+            new docx.Paragraph({
+                children: [new docx.TextRun({
+                    text: '• For open-ended question, you will receive minimum or zero points if you only show answers without any supporting calculations.',
+                    size: 20
+                })],
+                spacing: { after: 120 }
+            }),
+            new docx.Paragraph({
+                children: [new docx.TextRun({
+                    text: '• You must transfer your answers for the multiple choice questions to this coversheet below. If not, you\'ll lose 10 points.',
+                    size: 20
+                })],
+                spacing: { after: 240 }
+            })
+        );
+
+        const pointsTableRows = [
+            new docx.TableRow({ children: [new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'Points', bold: true })] })] }), new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'Score', bold: true })] })] })] }),
+            new docx.TableRow({ children: [new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'I.' })] })] }), new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: '150' })] })] })] }),
+            new docx.TableRow({ children: [new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'II.' })] })] }), new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: '25' })] })] })] }),
+            new docx.TableRow({ children: [new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'III.' })] })] }), new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: '25' })] })] })] }),
+            new docx.TableRow({ children: [new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'Total Points' })] })] }), new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: '200' })] })] })] })
+        ];
+        out.push(
+            new docx.Table({
+                rows: pointsTableRows,
+                width: { size: 40, type: docx.WidthType.PERCENTAGE }
+            })
+        );
+
+        out.push(
+            new docx.Paragraph({
+                children: [new docx.TextRun({
+                    text: 'An important aspect of being a professional is that of honor and professional conduct.',
+                    size: 20
+                })],
+                spacing: { before: 280, after: 120 }
+            }),
+            new docx.Paragraph({
+                children: [new docx.TextRun({
+                    text: 'I pledge that I have neither given nor received aid in the completion of this examination.',
+                    size: 20
+                })],
+                spacing: { after: 120 }
+            }),
+            new docx.Paragraph({
+                children: [new docx.TextRun({ text: '____________________________________________  LEGIBLE SIGNATURE', size: 20 })],
+                spacing: { after: 320 }
+            }),
+            new docx.Paragraph({
+                children: [new docx.TextRun({ text: 'I. MULTIPLE CHOICE', bold: true, size: 22 })],
+                spacing: { after: 120 }
+            }),
+            new docx.Paragraph({
+                children: [new docx.TextRun({ text: 'Write the letter that best answers each question.', size: 20 })],
+                spacing: { after: 200 }
+            })
+        );
+
+        const cols = 10;
+        const blockCount = Math.ceil(questionCount / cols);
+        const gridRows = [];
+        for (let b = 0; b < blockCount; b++) {
+            const qCells = [new docx.TableCell({
+                children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'Q.', size: 18 })] })],
+                width: { size: 8, type: docx.WidthType.PERCENTAGE }
+            })];
+            const aCells = [new docx.TableCell({
+                children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'A.', size: 18 })] })],
+                width: { size: 8, type: docx.WidthType.PERCENTAGE }
+            })];
+            for (let c = 0; c < cols; c++) {
+                const num = b * cols + c + 1;
+                qCells.push(new docx.TableCell({
+                    children: [new docx.Paragraph({
+                        children: [new docx.TextRun({ text: num <= questionCount ? String(num) : '', size: 18 })],
+                        alignment: docx.AlignmentType.CENTER
+                    })],
+                    width: { size: (92 / cols), type: docx.WidthType.PERCENTAGE }
+                }));
+                aCells.push(new docx.TableCell({
+                    children: [new docx.Paragraph({ children: [] })],
+                    width: { size: (92 / cols), type: docx.WidthType.PERCENTAGE }
+                }));
+            }
+            gridRows.push(
+                new docx.TableRow({ children: qCells }),
+                new docx.TableRow({ children: aCells })
+            );
+        }
+        out.push(
+            new docx.Table({
+                rows: gridRows,
+                width: { size: 100, type: docx.WidthType.PERCENTAGE },
+                borders: {
+                    top: borderOption,
+                    bottom: borderOption,
+                    left: borderOption,
+                    right: borderOption,
+                    insideHorizontal: borderOption,
+                    insideVertical: borderOption
+                }
+            })
+        );
+        out.push(new docx.Paragraph({ children: [new docx.PageBreak()], spacing: { after: 0 } }));
+        return out;
+    }
+
     // 生成題目卷（學生用）
     async generateQuestionSheet(examName, questions) {
         // 所有內容將添加到同一個 section，確保連續流動
         const allChildren = [];
+
+        if (currentSubject === 'managerial') {
+            allChildren.push(...this._buildManagerialCoverPage(questions.length));
+        }
         
         // 1. 標題
         allChildren.push(
