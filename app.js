@@ -520,7 +520,7 @@ class QuestionGenerator {
 // ========== Word 文檔生成器類別 ==========
 class WordGenerator {
     // Managerial 專用：產生封面頁元素（含答案格），傳入題目總數以決定格數
-    _buildManagerialCoverPage(questionCount) {
+    _buildManagerialCoverPage(questionCount, examName) {
         const out = [];
         const borderOption = (typeof docx.BorderStyle !== 'undefined')
             ? { style: docx.BorderStyle.SINGLE, size: 4 }
@@ -543,7 +543,7 @@ class WordGenerator {
                 spacing: { after: 80 }
             }),
             new docx.Paragraph({
-                children: [new docx.TextRun({ text: 'Spring 2025 – Exam 2', size: 22 })],
+                children: [new docx.TextRun({ text: examName || 'Spring 2025 – Exam 2', size: 22 })],
                 alignment: docx.AlignmentType.CENTER,
                 spacing: { after: 320 }
             }),
@@ -672,7 +672,7 @@ class WordGenerator {
         const allChildren = [];
 
         if (currentSubject === 'managerial') {
-            allChildren.push(...this._buildManagerialCoverPage(questions.length));
+            allChildren.push(...this._buildManagerialCoverPage(questions.length, examName));
         }
         
         // 1. 標題
