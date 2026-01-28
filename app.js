@@ -537,6 +537,10 @@ class WordGenerator {
             ? points.total 
             : defaultTotal;
         
+        // 封面頁表格行高設定（單位：twips，1 twip = 1/20 point）
+        const COVER_POINTS_ROW_HEIGHT = 500; // Points 表格行高（約 25 points，明顯變高方便手寫）
+        const ANSWER_GRID_ROW_HEIGHT = 550;  // Answer Grid 行高（比 Points 稍高，確保手寫空間）
+        
         const out = [];
         const borderOption = (typeof docx.BorderStyle !== 'undefined')
             ? { style: docx.BorderStyle.SINGLE, size: 4 }
@@ -589,6 +593,7 @@ class WordGenerator {
         const pointsTableRows = [
             // 表頭
             new docx.TableRow({ 
+                height: { value: COVER_POINTS_ROW_HEIGHT, rule: docx.HeightRule.EXACT },
                 children: [
                     new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'Parts', bold: true })] })] }), 
                     new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'Points', bold: true })] })] }), 
@@ -603,6 +608,7 @@ class WordGenerator {
             const value = (row.value !== undefined && row.value !== null) ? row.value : 0;
             pointsTableRows.push(
                 new docx.TableRow({ 
+                    height: { value: COVER_POINTS_ROW_HEIGHT, rule: docx.HeightRule.EXACT },
                     children: [
                         new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: label + '.' })] })] }), 
                         new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: String(value) })] })] }), 
@@ -615,6 +621,7 @@ class WordGenerator {
         // Total Points 列
         pointsTableRows.push(
             new docx.TableRow({ 
+                height: { value: COVER_POINTS_ROW_HEIGHT, rule: docx.HeightRule.EXACT },
                 children: [
                     new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'Total Points' })] })] }), 
                     new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: String(ptsTotal) })] })] }), 
@@ -685,8 +692,14 @@ class WordGenerator {
                 }));
             }
             gridRows.push(
-                new docx.TableRow({ children: qCells }),
-                new docx.TableRow({ children: aCells })
+                new docx.TableRow({ 
+                    height: { value: ANSWER_GRID_ROW_HEIGHT, rule: docx.HeightRule.EXACT },
+                    children: qCells 
+                }),
+                new docx.TableRow({ 
+                    height: { value: ANSWER_GRID_ROW_HEIGHT, rule: docx.HeightRule.EXACT },
+                    children: aCells 
+                })
             );
         }
         out.push(
