@@ -29,6 +29,8 @@ let selectedExamType = 'Exam 1';
 let pdfFiles = [];
 let parsedQuestions = []; // 所有題目的陣列
 let parsedQuestionsByFile = []; // 按檔案分組的題目 [{file, questions}, ...]
+let parsedExerciseQuestions = []; // 所有 EX 題目的陣列（暫不進入匯出流程）
+let exRequestedCountsByFileIndex = []; // 使用者對每檔案設定的 EX 題數（state）
 let parser = null;
 let generator = null;
 
@@ -46,17 +48,26 @@ class PDFParser {
     // 解析多個 PDF 檔案（返回按檔案分組的結果）
     async parsePDFs(files) {
         this.questions = [];
+        const allExQuestions = [];
         const resultsByFile = [];
         
         for (let i = 0; i < files.length; i++) {
             const file = files[i];
             try {
-                const questions = await this.parseSinglePDF(file);
-                this.questions = this.questions.concat(questions);
+                const parsed = await this.parseSinglePDF(file);
+                const mcQuestions = (parsed && parsed.mcQuestions) ? parsed.mcQuestions : [];
+                const exQuestions = (parsed && parsed.exQuestions) ? parsed.exQuestions : [];
+
+                // 注意：維持既有行為 —— allQuestions / questions 仍代表 MC（含 Financial）題目集合
+                this.questions = this.questions.concat(mcQuestions);
+                allExQuestions.push(...exQuestions);
                 resultsByFile.push({
                     file: file,
                     fileName: file.name,
-                    questions: questions
+                    // 為了不破壞既有流程：questions 仍等於 MC 題目陣列
+                    questions: mcQuestions,
+                    mcQuestions: mcQuestions,
+                    exQuestions: exQuestions
                 });
             } catch (error) {
                 console.error(`解析 ${file.name} 失敗:`, error);
@@ -66,6 +77,7 @@ class PDFParser {
         
         return {
             allQuestions: this.questions,
+            allExQuestions: allExQuestions,
             byFile: resultsByFile
         };
     }
@@ -127,11 +139,11 @@ class PDFParser {
         const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
 
         if (currentSubject === 'financial') {
-            return await this.parseFinancialByPage(pdf, file);
+            const mcQuestions = await this.parseFinancialByPage(pdf, file);
+            return { mcQuestions, exQuestions: [] };
         }
 
         // 以下是原有 Managerial 邏輯，完全不要動
-        const questions = [];
         let allLines = [];
         for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
             const page = await pdf.getPage(pageNum);
@@ -140,9 +152,9 @@ class PDFParser {
             allLines = allLines.concat(pageLines);
         }
         const fullText = allLines.join('\n');
-        const extractedQuestions = this.extractQuestionsFromText(fullText);
-        questions.push(...extractedQuestions);
-        return questions;
+        const mcQuestions = this.extractQuestionsFromText(fullText);
+        const exQuestions = this.extractExerciseQuestionsFromText(fullText);
+        return { mcQuestions, exQuestions };
     }
 
     async parseFinancialByPage(pdfDoc, fileMeta) {
@@ -316,6 +328,100 @@ class PDFParser {
         }
         
         return questions;
+    }
+
+    // 從文字中提取 EX（非選擇題）
+    // 目標：可靠抓到 EX 題目的分段與原始文字（不影響既有 MC 解析）
+    extractExerciseQuestionsFromText(text) {
+        const exQuestions = [];
+
+        // EX header：EX.03.37、EX.04.40.ALGO、EX.04.40.SOMETHING...
+        // 允許前面有題號「12. 」等；並允許 EX 與數字之間有空白或換行
+        const exHeaderPattern = /\b(\d+\.\s*)?(EX\.\d+\.\d+(?:\.[A-Z0-9]+)*)\b/gi;
+
+        // 邊界：下一個 MC 或 EX header（用來切分區塊）
+        // 注意：MC 的 suffix 只允許 .ALGO（沿用既有規則）
+        const boundaryPattern = /\b(\d+\.\s*)?((?:MC\.\d+\.\d+(?:\.ALGO)?)|(?:EX\.\d+\.\d+(?:\.[A-Z0-9]+)*))\b/gi;
+        const boundaries = [...text.matchAll(boundaryPattern)].map(m => ({
+            index: m.index,
+            id: m[2]
+        })).sort((a, b) => a.index - b.index);
+
+        const exMatches = [...text.matchAll(exHeaderPattern)];
+        for (let i = 0; i < exMatches.length; i++) {
+            const match = exMatches[i];
+            const originalId = match[2];
+            const startPos = match.index;
+
+            // 找下一個邊界（MC/EX 皆可），或文字結尾
+            let endPos = text.length;
+            for (let b = 0; b < boundaries.length; b++) {
+                if (boundaries[b].index > startPos) {
+                    endPos = boundaries[b].index;
+                    break;
+                }
+            }
+
+            const rawBlockText = text.substring(startPos, endPos);
+            const q = this.parseExerciseQuestion(rawBlockText, originalId);
+            if (q) exQuestions.push(q);
+        }
+
+        return exQuestions;
+    }
+
+    // 解析單個 EX 題：以 "Required:" 作為題幹/要求分界（若不存在則保留整段）
+    parseExerciseQuestion(rawBlockText, originalId) {
+        try {
+            const escapeRegExp = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+            // 移除 header（含可能的前綴題號）
+            const headerPatternWithNum = new RegExp(`\\b\\d+\\.\\s*${escapeRegExp(originalId)}\\b\\s*`, 'i');
+            const headerPatternNoNum = new RegExp(`\\b${escapeRegExp(originalId)}\\b\\s*`, 'i');
+
+            let body = (rawBlockText || '').replace(headerPatternWithNum, '').trim();
+            body = body.replace(headerPatternNoNum, '').trim();
+
+            // 在 EX 區塊內，常見後段包含 Solution/Feedback/Check My Work；先把這些後段切掉（保守）
+            // 只做「第一次命中」的截斷，避免破壞題幹內容
+            const stopMatch = body.match(/(?:\n|\r|\s)(Solution|Feedback|Check My Work|Post-Submission)\b/i);
+            if (stopMatch && stopMatch.index != null && stopMatch.index > 0) {
+                body = body.substring(0, stopMatch.index).trim();
+            }
+
+            // Required: 分段（題幹通常在 Required: 之後）
+            let promptText = '';
+            let requiredText = '';
+            const requiredMatch = body.match(/\bRequired\s*:/i);
+            if (requiredMatch && requiredMatch.index != null) {
+                promptText = body.substring(0, requiredMatch.index).trim();
+                requiredText = body.substring(requiredMatch.index).replace(/\bRequired\s*:/i, '').trim();
+            } else {
+                // 若找不到 Required:，先把整段放在 requiredText（較符合「敘述/要求」在下方的實務）
+                requiredText = body.trim();
+            }
+
+            // 嘗試抓答案線索（不追求完美；先保留含 ✔/✓ 或底線的行作為 token）
+            const tokens = [];
+            const lines = (body || '').split('\n').map(l => (l || '').trim()).filter(Boolean);
+            for (const line of lines) {
+                if (/[✔✓]/.test(line) || /_{3,}/.test(line)) {
+                    tokens.push(line);
+                }
+            }
+
+            return {
+                originalId,
+                type: 'EX',
+                promptText: promptText,
+                requiredText: requiredText,
+                answerTextOrTokens: tokens.join('\n').trim(),
+                rawBlockText: rawBlockText
+            };
+        } catch (e) {
+            console.error('解析 EX 題目失敗:', e);
+            return null;
+        }
     }
 
     // 解析單個題目
@@ -1505,27 +1611,54 @@ function updateFileList() {
         fileList.appendChild(titleDiv);
         
         parsedQuestionsByFile.forEach((item, index) => {
+            const mcAvailable = item.questions.length; // 維持既有：questions === MC
+            const exAvailable = (item.exQuestions && item.exQuestions.length) ? item.exQuestions.length : 0;
+            const exRequested = (parseInt(exRequestedCountsByFileIndex[index], 10) || 0);
             const fileItem = document.createElement('div');
             fileItem.className = 'file-item';
             fileItem.innerHTML = `
                 <div style="flex: 1;">
                     <span class="file-name">${item.fileName}</span>
-                    <span style="color: #888; font-size: 12px; margin-left: 10px;">（可用：${item.questions.length} 題）</span>
+                    <span style="color: #888; font-size: 12px; margin-left: 10px;">（MC 可用：${mcAvailable} 題 / EX 可用：${exAvailable} 題）</span>
                 </div>
                 <div style="display: flex; align-items: center; gap: 10px;">
-                    <label style="font-size: 14px; color: #555;">題目數：</label>
+                    <label style="font-size: 14px; color: #555;">MC：</label>
                     <input type="number" 
                            id="questionCount_${index}" 
                            class="question-count-input" 
                            min="0" 
-                           max="${item.questions.length}"
+                           max="${mcAvailable}"
                            step="1"
                            value="0" 
+                           style="width: 60px; padding: 5px; border: 2px solid #ddd; border-radius: 4px; text-align: center;">
+                    <label style="font-size: 14px; color: #555;">EX：</label>
+                    <input type="number" 
+                           id="exQuestionCount_${index}" 
+                           class="question-count-input" 
+                           min="0" 
+                           max="${exAvailable}"
+                           step="1"
+                           value="${exRequested}" 
                            style="width: 60px; padding: 5px; border: 2px solid #ddd; border-radius: 4px; text-align: center;">
                     <button class="file-remove" onclick="removeFile(${index})">移除</button>
                 </div>
             `;
             fileList.appendChild(fileItem);
+
+            // EX Requested Count：基本驗證 + 存 state（不影響既有匯出）
+            const exInput = document.getElementById(`exQuestionCount_${index}`);
+            if (exInput) {
+                const clampAndStore = () => {
+                    let v = parseInt(exInput.value, 10);
+                    if (isNaN(v)) v = 0;
+                    if (v < 0) v = 0;
+                    if (v > exAvailable) v = exAvailable;
+                    exInput.value = String(v);
+                    exRequestedCountsByFileIndex[index] = v;
+                };
+                exInput.addEventListener('input', clampAndStore);
+                exInput.addEventListener('change', clampAndStore);
+            }
         });
     } else {
         // 如果還沒有解析結果，只顯示檔案名稱
@@ -1550,10 +1683,15 @@ window.removeFile = function(index) {
     if (parsedQuestionsByFile.length > index) {
         parsedQuestionsByFile.splice(index, 1);
     }
+    if (exRequestedCountsByFileIndex.length > index) {
+        exRequestedCountsByFileIndex.splice(index, 1);
+    }
     updateFileList();
     parsedQuestions = [];
+    parsedExerciseQuestions = [];
     if (pdfFiles.length === 0) {
         parsedQuestionsByFile = [];
+        exRequestedCountsByFileIndex = [];
     }
     parseSection.style.display = 'none';
     generateSection.style.display = 'none';
@@ -1609,6 +1747,9 @@ async function parsePDFs() {
         const parseResult = await parser.parsePDFs(pdfFiles);
         parsedQuestions = parseResult.allQuestions;
         parsedQuestionsByFile = parseResult.byFile;
+        parsedExerciseQuestions = parseResult.allExQuestions || [];
+        // 對齊每檔案的 EX requested state（預設 0）
+        exRequestedCountsByFileIndex = parsedQuestionsByFile.map((_, i) => (parseInt(exRequestedCountsByFileIndex[i], 10) || 0));
         
         if (parsedQuestions.length === 0) {
             var msg = currentSubject === 'financial'
@@ -1620,11 +1761,16 @@ async function parsePDFs() {
         }
 
         // 顯示解析結果（按檔案分組）
+        const totalMC = parsedQuestions.length;
+        const totalEX = parsedQuestionsByFile.reduce((sum, it) => sum + ((it.exQuestions && it.exQuestions.length) ? it.exQuestions.length : 0), 0);
         let infoHTML = `<h3>解析完成！</h3><ul>`;
-        infoHTML += `<li>總共找到 <strong>${parsedQuestions.length}</strong> 題 MC 題目</li>`;
+        infoHTML += `<li>總共找到 <strong>${totalMC}</strong> 題 MC 題目</li>`;
+        infoHTML += `<li>總共找到 <strong>${totalEX}</strong> 題 EX（非選擇題）</li>`;
         infoHTML += `<li>檔案數量：<strong>${parsedQuestionsByFile.length}</strong> 個</li>`;
         parsedQuestionsByFile.forEach((item, index) => {
-            infoHTML += `<li>${item.fileName}: ${item.questions.length} 題</li>`;
+            const mcCount = (item.mcQuestions ? item.mcQuestions.length : item.questions.length);
+            const exCount = (item.exQuestions ? item.exQuestions.length : 0);
+            infoHTML += `<li>${item.fileName}: MC ${mcCount} 題 / EX ${exCount} 題</li>`;
         });
         infoHTML += `</ul>`;
         parsedQuestionsDiv.innerHTML = infoHTML;
@@ -1679,6 +1825,24 @@ generateBtn.addEventListener('click', async () => {
         const countInput = document.getElementById(`questionCount_${i}`);
         const requestedCount = parseInt(countInput ? countInput.value : 0, 10) || 0;
         const availableCount = parsedQuestionsByFile[i].questions.length;
+        
+        // EX Requested Count：先做基本驗證並存 state（本輪不納入匯出）
+        const exInput = document.getElementById(`exQuestionCount_${i}`);
+        const exRequested = parseInt(exInput ? exInput.value : 0, 10) || 0;
+        const exAvailable = (parsedQuestionsByFile[i].exQuestions && parsedQuestionsByFile[i].exQuestions.length) ? parsedQuestionsByFile[i].exQuestions.length : 0;
+        if (exRequested < 0) {
+            hasError = true;
+            errorMessage = `${parsedQuestionsByFile[i].fileName}: EX 題目數不能為負數`;
+            break;
+        }
+        
+        if (exRequested > exAvailable) {
+            hasError = true;
+            errorMessage = `${parsedQuestionsByFile[i].fileName}: EX 請求 ${exRequested} 題，但只有 ${exAvailable} 題可用`;
+            break;
+        }
+        
+        exRequestedCountsByFileIndex[i] = exRequested;
         
         if (requestedCount < 0) {
             hasError = true;
