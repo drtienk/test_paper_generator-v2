@@ -1153,7 +1153,7 @@ class WordGenerator {
     }
 
     // 生成答案卷（教師用）
-    async generateAnswerSheet(examName, questions) {
+    async generateAnswerSheet(examName, questions, exSelectedAll = []) {
         // 所有內容將添加到同一個 section，確保連續流動
         const allChildren = [];
         
@@ -1323,10 +1323,245 @@ class WordGenerator {
             }
         });
 
+        // EX 區塊（僅 Managerial Accounting，且要有 EX 題目）
+        if (currentSubject === 'managerial' && exSelectedAll && exSelectedAll.length > 0) {
+            // EX 區塊標題
+            answerChildren.push(
+                new docx.Paragraph({
+                    children: [
+                        new docx.TextRun({
+                            text: 'II. EXERCISES (Selected)',
+                            bold: true,
+                            size: 22
+                        })
+                    ],
+                    spacing: { before: 400, after: 200 }
+                })
+            );
+
+            // 輸出每個 EX 題目的完整內容
+            exSelectedAll.forEach((ex, index) => {
+                // 1. 完整原始編號標題
+                answerChildren.push(
+                    new docx.Paragraph({
+                        children: [
+                            new docx.TextRun({
+                                text: ex.originalId,
+                                bold: true,
+                                size: 22
+                            })
+                        ],
+                        spacing: { before: index === 0 ? 0 : 300, after: 100 }
+                    })
+                );
+
+                // 2. 題目敘述（promptText）
+                if (ex.promptText && ex.promptText.trim()) {
+                    answerChildren.push(
+                        new docx.Paragraph({
+                            children: [
+                                new docx.TextRun({
+                                    text: ex.promptText.trim(),
+                                    size: 20
+                                })
+                            ],
+                            spacing: { after: 100 }
+                        })
+                    );
+                }
+
+                // 3. Required 區塊
+                if (ex.requiredText && ex.requiredText.trim()) {
+                    answerChildren.push(
+                        new docx.Paragraph({
+                            children: [
+                                new docx.TextRun({
+                                    text: 'Required:',
+                                    bold: true,
+                                    size: 20
+                                })
+                            ],
+                            spacing: { after: 50 }
+                        }),
+                        new docx.Paragraph({
+                            children: [
+                                new docx.TextRun({
+                                    text: ex.requiredText.trim(),
+                                    size: 20
+                                })
+                            ],
+                            spacing: { after: 100 },
+                            indent: { left: 400 }
+                        })
+                    );
+                }
+
+                // 4. 答案內容（answerTextOrTokens）
+                if (ex.answerTextOrTokens && ex.answerTextOrTokens.trim()) {
+                    answerChildren.push(
+                        new docx.Paragraph({
+                            children: [
+                                new docx.TextRun({
+                                    text: 'Answer:',
+                                    bold: true,
+                                    size: 20
+                                })
+                            ],
+                            spacing: { after: 50 }
+                        }),
+                        new docx.Paragraph({
+                            children: [
+                                new docx.TextRun({
+                                    text: ex.answerTextOrTokens.trim(),
+                                    size: 20
+                                })
+                            ],
+                            spacing: { after: 100 },
+                            indent: { left: 400 }
+                        })
+                    );
+                }
+
+                // 5. 完整原始文字區塊（包含 Feedback/Solution/Check My Work/Post-Submission 等）
+                // 從 rawBlockText 中提取 Feedback 等後段內容
+                if (ex.rawBlockText && ex.rawBlockText.trim()) {
+                    const rawText = ex.rawBlockText.trim();
+                    
+                    // 提取 Feedback 區塊
+                    const feedbackMatch = rawText.match(/Feedback\s+(.+?)(?=Post-Submission|Check My Work|Solution|$)/is);
+                    if (feedbackMatch && feedbackMatch[1]) {
+                        const feedbackContent = feedbackMatch[1].trim();
+                        if (feedbackContent) {
+                            answerChildren.push(
+                                new docx.Paragraph({
+                                    children: [
+                                        new docx.TextRun({
+                                            text: 'Feedback:',
+                                            bold: true,
+                                            size: 20
+                                        })
+                                    ],
+                                    spacing: { after: 50 }
+                                }),
+                                new docx.Paragraph({
+                                    children: [
+                                        new docx.TextRun({
+                                            text: feedbackContent,
+                                            size: 20
+                                        })
+                                    ],
+                                    spacing: { after: 100 },
+                                    indent: { left: 400 }
+                                })
+                            );
+                        }
+                    }
+
+                    // 提取 Solution 區塊
+                    const solutionMatch = rawText.match(/Solution\s+(.+?)(?=Feedback|Post-Submission|Check My Work|$)/is);
+                    if (solutionMatch && solutionMatch[1]) {
+                        const solutionContent = solutionMatch[1].trim();
+                        if (solutionContent) {
+                            answerChildren.push(
+                                new docx.Paragraph({
+                                    children: [
+                                        new docx.TextRun({
+                                            text: 'Solution:',
+                                            bold: true,
+                                            size: 20
+                                        })
+                                    ],
+                                    spacing: { after: 50 }
+                                }),
+                                new docx.Paragraph({
+                                    children: [
+                                        new docx.TextRun({
+                                            text: solutionContent,
+                                            size: 20
+                                        })
+                                    ],
+                                    spacing: { after: 100 },
+                                    indent: { left: 400 }
+                                })
+                            );
+                        }
+                    }
+
+                    // 提取 Check My Work 區塊
+                    const checkMatch = rawText.match(/Check My Work\s+(.+?)(?=Feedback|Post-Submission|Solution|$)/is);
+                    if (checkMatch && checkMatch[1]) {
+                        const checkContent = checkMatch[1].trim();
+                        if (checkContent) {
+                            answerChildren.push(
+                                new docx.Paragraph({
+                                    children: [
+                                        new docx.TextRun({
+                                            text: 'Check My Work:',
+                                            bold: true,
+                                            size: 20
+                                        })
+                                    ],
+                                    spacing: { after: 50 }
+                                }),
+                                new docx.Paragraph({
+                                    children: [
+                                        new docx.TextRun({
+                                            text: checkContent,
+                                            size: 20
+                                        })
+                                    ],
+                                    spacing: { after: 100 },
+                                    indent: { left: 400 }
+                                })
+                            );
+                        }
+                    }
+
+                    // 提取 Post-Submission 區塊
+                    const postMatch = rawText.match(/Post-Submission\s+(.+?)(?=Feedback|Check My Work|Solution|$)/is);
+                    if (postMatch && postMatch[1]) {
+                        const postContent = postMatch[1].trim();
+                        if (postContent) {
+                            answerChildren.push(
+                                new docx.Paragraph({
+                                    children: [
+                                        new docx.TextRun({
+                                            text: 'Post-Submission:',
+                                            bold: true,
+                                            size: 20
+                                        })
+                                    ],
+                                    spacing: { after: 50 }
+                                }),
+                                new docx.Paragraph({
+                                    children: [
+                                        new docx.TextRun({
+                                            text: postContent,
+                                            size: 20
+                                        })
+                                    ],
+                                    spacing: { after: 100 },
+                                    indent: { left: 400 }
+                                })
+                            );
+                        }
+                    }
+                }
+
+                // 題目之間的分隔
+                answerChildren.push(
+                    new docx.Paragraph({
+                        children: [],
+                        spacing: { after: 200 }
+                    })
+                );
+            });
+        }
+
         // 將摘要表格和詳細題目都添加到同一個陣列
         allChildren.push(...answerChildren);
         
-        // 創建單一 section，包含所有內容（標題、摘要表格、詳細題目）
+        // 創建單一 section，包含所有內容（標題、摘要表格、詳細題目、EX 題目）
         const doc = new docx.Document({
             sections: [{
                 properties: {},
@@ -2023,7 +2258,7 @@ generateBtn.addEventListener('click', async () => {
         console.log('Questions doc generated');
         
         console.log('Generating Answers doc...');
-        const answerBlob = await wordGen.generateAnswerSheet(examName, examQuestions);
+        const answerBlob = await wordGen.generateAnswerSheet(examName, examQuestions, exSelectedAll);
         console.log('Answers doc generated');
         
         // 下載兩個檔案（分別下載，確保不會覆蓋）
