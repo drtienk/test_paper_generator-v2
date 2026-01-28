@@ -661,6 +661,49 @@ class WordGenerator {
         return out;
     }
 
+    // Answer Sheet 專用：由左到右、每列 perRow 題的答案摘要格（與題目卷答案格同版型）
+    _buildHorizontalAnswerGrid(questions, perRow) {
+        perRow = perRow || 10;
+        const n = questions.length;
+        const blockCount = Math.ceil(n / perRow);
+        const gridRows = [];
+        for (let b = 0; b < blockCount; b++) {
+            const qCells = [new docx.TableCell({
+                children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'Q.', size: 18 })] })],
+                width: { size: 8, type: docx.WidthType.PERCENTAGE }
+            })];
+            const aCells = [new docx.TableCell({
+                children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'A.', size: 18 })] })],
+                width: { size: 8, type: docx.WidthType.PERCENTAGE }
+            })];
+            for (let c = 0; c < perRow; c++) {
+                const idx = b * perRow + c;
+                const num = idx + 1;
+                const label = num <= n ? String(num) : '';
+                qCells.push(new docx.TableCell({
+                    children: [new docx.Paragraph({
+                        children: [new docx.TextRun({ text: label, size: 18 })],
+                        alignment: docx.AlignmentType.CENTER
+                    })],
+                    width: { size: (92 / perRow), type: docx.WidthType.PERCENTAGE }
+                }));
+                const ans = (idx < n && questions[idx].correctOption) ? questions[idx].correctOption.toUpperCase() : '';
+                aCells.push(new docx.TableCell({
+                    children: [new docx.Paragraph({
+                        children: [new docx.TextRun({ text: ans, size: 18 })],
+                        alignment: docx.AlignmentType.CENTER
+                    })],
+                    width: { size: (92 / perRow), type: docx.WidthType.PERCENTAGE }
+                }));
+            }
+            gridRows.push(
+                new docx.TableRow({ children: qCells }),
+                new docx.TableRow({ children: aCells })
+            );
+        }
+        return gridRows;
+    }
+
     // 生成題目卷（學生用）
     async generateQuestionSheet(examName, questions) {
         // 所有內容將添加到同一個 section，確保連續流動
@@ -806,80 +849,8 @@ class WordGenerator {
             })
         );
 
-        // 答案摘要表格（在詳細題目之前）
-        const summaryTableRows = [];
-        
-        // 表頭
-        summaryTableRows.push(
-            new docx.TableRow({
-                children: [
-                    new docx.TableCell({
-                        children: [
-                            new docx.Paragraph({
-                                children: [
-                                    new docx.TextRun({
-                                        text: 'Question No.',
-                                        bold: true
-                                    })
-                                ],
-                                alignment: docx.AlignmentType.CENTER
-                            })
-                        ],
-                        shading: { fill: 'D3D3D3' }
-                    }),
-                    new docx.TableCell({
-                        children: [
-                            new docx.Paragraph({
-                                children: [
-                                    new docx.TextRun({
-                                        text: 'Answer',
-                                        bold: true
-                                    })
-                                ],
-                                alignment: docx.AlignmentType.CENTER
-                            })
-                        ],
-                        shading: { fill: 'D3D3D3' }
-                    })
-                ]
-            })
-        );
-        
-        // 表格內容（使用相同的問題順序）
-        questions.forEach((q, index) => {
-            summaryTableRows.push(
-                new docx.TableRow({
-                    children: [
-                        new docx.TableCell({
-                            children: [
-                                new docx.Paragraph({
-                                    children: [
-                                        new docx.TextRun({
-                                            text: `${index + 1}`,
-                                            size: 20
-                                        })
-                                    ],
-                                    alignment: docx.AlignmentType.CENTER
-                                })
-                            ]
-                        }),
-                        new docx.TableCell({
-                            children: [
-                                new docx.Paragraph({
-                                    children: [
-                                        new docx.TextRun({
-                                            text: q.correctOption.toUpperCase(),
-                                            size: 20
-                                        })
-                                    ],
-                                    alignment: docx.AlignmentType.CENTER
-                                })
-                            ]
-                        })
-                    ]
-                })
-            );
-        });
+        // 答案摘要表格（在詳細題目之前）：由左到右、每列 10 題，與題目卷答案格同版型
+        const summaryTableRows = this._buildHorizontalAnswerGrid(questions, 10);
 
         // 答案列表（順序必須與題目卷一致）
         // 所有答案添加到同一個 section，讓 Word 自然處理分頁
@@ -900,11 +871,22 @@ class WordGenerator {
             })
         );
         
-        // 添加摘要表格
+        // 添加摘要表格（與題目卷答案格同邊框與寬度）
+        const summaryBorder = (typeof docx.BorderStyle !== 'undefined')
+            ? { style: docx.BorderStyle.SINGLE, size: 4 }
+            : { size: 4 };
         answerChildren.push(
             new docx.Table({
                 rows: summaryTableRows,
-                width: { size: 50, type: docx.WidthType.PERCENTAGE }
+                width: { size: 100, type: docx.WidthType.PERCENTAGE },
+                borders: {
+                    top: summaryBorder,
+                    bottom: summaryBorder,
+                    left: summaryBorder,
+                    right: summaryBorder,
+                    insideHorizontal: summaryBorder,
+                    insideVertical: summaryBorder
+                }
             })
         );
         
