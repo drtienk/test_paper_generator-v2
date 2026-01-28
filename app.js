@@ -944,7 +944,7 @@ class WordGenerator {
     }
 
     // 生成題目卷（學生用）
-    async generateQuestionSheet(examName, questions, points) {
+    async generateQuestionSheet(examName, questions, points, exSelectedAll = []) {
         // 所有內容將添加到同一個 section，確保連續流動
         const allChildren = [];
 
@@ -1056,7 +1056,91 @@ class WordGenerator {
             });
         });
 
-        // 創建單一 section，包含所有內容（標題、表格、題目）
+        // EX 區塊（僅 Managerial Accounting，且要有 EX 題目）
+        if (currentSubject === 'managerial' && exSelectedAll && exSelectedAll.length > 0) {
+            // EX 區塊標題
+            allChildren.push(
+                new docx.Paragraph({
+                    children: [
+                        new docx.TextRun({
+                            text: 'II. EXERCISES',
+                            bold: true,
+                            size: 22
+                        })
+                    ],
+                    spacing: { before: 400, after: 200 }
+                })
+            );
+
+            // 輸出每個 EX 題目
+            exSelectedAll.forEach((ex, index) => {
+                // 題號（延續 MC 題號）
+                const exNumber = questions.length + index + 1;
+                
+                // 組合題目內容：promptText + Required: + requiredText
+                let exContent = '';
+                if (ex.promptText && ex.promptText.trim()) {
+                    exContent += ex.promptText.trim() + ' ';
+                }
+                if (ex.requiredText && ex.requiredText.trim()) {
+                    exContent += 'Required: ' + ex.requiredText.trim();
+                } else if (ex.promptText && ex.promptText.trim()) {
+                    // 如果沒有 requiredText，至少保留 promptText
+                    exContent = ex.promptText.trim();
+                }
+                
+                // 移除答案相關內容：
+                // 1. 移除 ✔/✓ 標記
+                exContent = exContent.replace(/[✔✓]/g, '');
+                // 2. 移除 Solution/Feedback/Check My Work/Post-Submission 等後段內容
+                exContent = exContent.replace(/Solution\b.*$/i, '').trim();
+                exContent = exContent.replace(/Feedback\b.*$/i, '').trim();
+                exContent = exContent.replace(/Check My Work\b.*$/i, '').trim();
+                exContent = exContent.replace(/Post-Submission\b.*$/i, '').trim();
+                // 3. 移除原始 EX 編號（如 EX.03.37、EX.04.40.ALGO）
+                exContent = exContent.replace(/\bEX\.\d+\.\d+(?:\.[A-Z0-9]+)*\b/gi, '').trim();
+                // 4. 移除可能存在的答案字串（answerTextOrTokens 中的內容）
+                // 注意：answerTextOrTokens 可能包含含 ✔/✓ 或底線的行，這些已在解析時分離
+                // 這裡主要處理 requiredText 中可能殘留的答案內容
+                
+                // 清理多餘空白
+                exContent = exContent.replace(/\s+/g, ' ').trim();
+                
+                // 題目編號和內容（不顯示 originalId）
+                allChildren.push(
+                    new docx.Paragraph({
+                        children: [
+                            new docx.TextRun({
+                                text: `${exNumber}. ${exContent}`,
+                                size: 22
+                            })
+                        ],
+                        spacing: { before: index === 0 ? 0 : 300, after: 200 }
+                    })
+                );
+                
+                // 作答區：用底線取代答案位置
+                // 如果有 answerTextOrTokens，表示原本有答案位置，用底線取代
+                // 否則在題目最後加 2-4 行底線當作答空間
+                const answerLines = 3; // 預設 3 行作答空間
+                for (let i = 0; i < answerLines; i++) {
+                    allChildren.push(
+                        new docx.Paragraph({
+                            children: [
+                                new docx.TextRun({
+                                    text: '__________',
+                                    size: 20
+                                })
+                            ],
+                            spacing: { after: 100 },
+                            indent: { left: 400 }
+                        })
+                    );
+                }
+            });
+        }
+
+        // 創建單一 section，包含所有內容（標題、表格、題目、EX）
         const doc = new docx.Document({
             sections: [{
                 properties: {},
@@ -1904,6 +1988,30 @@ generateBtn.addEventListener('click', async () => {
             q.examNumber = index + 1;
         });
 
+        // EX 抽題邏輯（僅 Managerial Accounting）
+        let exSelectedAll = [];
+        if (currentSubject === 'managerial') {
+            const exSelectedByFile = [];
+            for (let i = 0; i < parsedQuestionsByFile.length; i++) {
+                const exRequested = exRequestedCountsByFileIndex[i] || 0;
+                const exAvailable = (parsedQuestionsByFile[i].exQuestions && parsedQuestionsByFile[i].exQuestions.length) 
+                    ? parsedQuestionsByFile[i].exQuestions 
+                    : [];
+                
+                if (exRequested > 0 && exAvailable.length > 0) {
+                    // 從該檔案的 exQuestions 隨機抽取
+                    const shuffled = generator.shuffle([...exAvailable]);
+                    const selected = shuffled.slice(0, exRequested);
+                    exSelectedByFile.push(...selected);
+                }
+            }
+            
+            // 合併所有檔案抽到的 EX，可選擇是否再 shuffle 一次
+            if (exSelectedByFile.length > 0) {
+                exSelectedAll = generator.shuffle(exSelectedByFile);
+            }
+        }
+
         // 讀取 Exam Points（僅 Managerial Accounting 需要）
         const examPoints = (currentSubject === 'managerial') ? readExamPointsFromUI() : null;
         
@@ -1911,7 +2019,7 @@ generateBtn.addEventListener('click', async () => {
         const wordGen = new WordGenerator();
         
         console.log('Generating Questions doc...');
-        const questionBlob = await wordGen.generateQuestionSheet(examName, examQuestions, examPoints);
+        const questionBlob = await wordGen.generateQuestionSheet(examName, examQuestions, examPoints, exSelectedAll);
         console.log('Questions doc generated');
         
         console.log('Generating Answers doc...');
