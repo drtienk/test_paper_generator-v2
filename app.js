@@ -948,6 +948,27 @@ class WordGenerator {
         // 所有內容將添加到同一個 section，確保連續流動
         const allChildren = [];
 
+        // 將多行文字（含 \n）轉成逐行 Paragraph（保留空白行）
+        // 僅供題目卷 EX 題排版使用，避免影響既有 MC / Financial 行為
+        const toParagraphsByLine = (text, paragraphOptions) => {
+            const opts = paragraphOptions || {};
+            const normalized = (text == null ? '' : String(text)).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+            const lines = normalized.split('\n');
+            const out = [];
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                if (line === '') {
+                    out.push(new docx.Paragraph({ children: [], ...opts }));
+                } else {
+                    out.push(new docx.Paragraph({
+                        children: [new docx.TextRun({ text: line.replace(/\s+$/g, ''), size: 20 })],
+                        ...opts
+                    }));
+                }
+            }
+            return out;
+        };
+
         if (currentSubject === 'managerial') {
             allChildren.push(...this._buildManagerialCoverPage(questions.length, examName, points));
         }
@@ -1076,48 +1097,72 @@ class WordGenerator {
             exSelectedAll.forEach((ex, index) => {
                 // 題號（延續 MC 題號）
                 const exNumber = questions.length + index + 1;
-                
-                // 組合題目內容：promptText + Required: + requiredText
-                let exContent = '';
-                if (ex.promptText && ex.promptText.trim()) {
-                    exContent += ex.promptText.trim() + ' ';
-                }
-                if (ex.requiredText && ex.requiredText.trim()) {
-                    exContent += 'Required: ' + ex.requiredText.trim();
-                } else if (ex.promptText && ex.promptText.trim()) {
-                    // 如果沒有 requiredText，至少保留 promptText
-                    exContent = ex.promptText.trim();
-                }
-                
-                // 移除答案相關內容：
-                // 1. 移除 ✔/✓ 標記
-                exContent = exContent.replace(/[✔✓]/g, '');
-                // 2. 移除 Solution/Feedback/Check My Work/Post-Submission 等後段內容
-                exContent = exContent.replace(/Solution\b.*$/i, '').trim();
-                exContent = exContent.replace(/Feedback\b.*$/i, '').trim();
-                exContent = exContent.replace(/Check My Work\b.*$/i, '').trim();
-                exContent = exContent.replace(/Post-Submission\b.*$/i, '').trim();
-                // 3. 移除原始 EX 編號（如 EX.03.37、EX.04.40.ALGO）
-                exContent = exContent.replace(/\bEX\.\d+\.\d+(?:\.[A-Z0-9]+)*\b/gi, '').trim();
-                // 4. 移除可能存在的答案字串（answerTextOrTokens 中的內容）
-                // 注意：answerTextOrTokens 可能包含含 ✔/✓ 或底線的行，這些已在解析時分離
-                // 這裡主要處理 requiredText 中可能殘留的答案內容
-                
-                // 清理多餘空白
-                exContent = exContent.replace(/\s+/g, ' ').trim();
-                
-                // 題目編號和內容（不顯示 originalId）
+
+                // 逐行輸出：prompt/stem + Required: + requiredText（保留 PDF 的換行）
+                const cleanExText = (t) => {
+                    let s = (t == null ? '' : String(t));
+                    // 1) 移除 ✔/✓
+                    s = s.replace(/[✔✓]/g, '');
+                    // 2) 移除 Solution/Feedback/Check My Work/Post-Submission 等後段內容（保守，避免把整段切掉太多）
+                    s = s.replace(/Solution\b[\s\S]*$/i, '');
+                    s = s.replace(/Feedback\b[\s\S]*$/i, '');
+                    s = s.replace(/Check My Work\b[\s\S]*$/i, '');
+                    s = s.replace(/Post-Submission\b[\s\S]*$/i, '');
+                    // 3) 移除原始 EX 編號
+                    s = s.replace(/\bEX\.\d+\.\d+(?:\.[A-Z0-9]+)*\b/gi, '');
+                    return s.trim();
+                };
+
+                const promptText = cleanExText(ex.promptText);
+                const requiredText = cleanExText(ex.requiredText);
+
+                const promptLines = promptText ? promptText.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n') : [];
+                const firstPromptLine = promptLines.length > 0 ? promptLines[0] : '';
+                const remainingPromptText = promptLines.length > 1 ? promptLines.slice(1).join('\n') : '';
+
+                // 先印出 EX 題號（用自己的連續題號；不印原始 EX 編號）
                 allChildren.push(
                     new docx.Paragraph({
                         children: [
                             new docx.TextRun({
-                                text: `${exNumber}. ${exContent}`,
+                                text: firstPromptLine ? `${exNumber}. ${firstPromptLine}` : `${exNumber}.`,
                                 size: 22
                             })
                         ],
-                        spacing: { before: index === 0 ? 0 : 300, after: 200 }
+                        spacing: { before: index === 0 ? 0 : 300, after: 80 }
                     })
                 );
+
+                // prompt/stem（續行逐行輸出）
+                if (remainingPromptText) {
+                    allChildren.push(...toParagraphsByLine(remainingPromptText, {
+                        spacing: { after: 80 },
+                        indent: { left: 400 }
+                    }));
+                }
+
+                // Required:（單獨一行）
+                if (requiredText) {
+                    allChildren.push(
+                        new docx.Paragraph({
+                            children: [
+                                new docx.TextRun({
+                                    text: 'Required:',
+                                    bold: true,
+                                    size: 20
+                                })
+                            ],
+                            spacing: { after: 50 },
+                            indent: { left: 400 }
+                        })
+                    );
+
+                    // requiredText（逐行輸出）
+                    allChildren.push(...toParagraphsByLine(requiredText, {
+                        spacing: { after: 80 },
+                        indent: { left: 400 }
+                    }));
+                }
                 
                 // 作答區：用底線取代答案位置
                 // 如果有 answerTextOrTokens，表示原本有答案位置，用底線取代
