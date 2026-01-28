@@ -269,3 +269,52 @@ h2 {
     0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }
 }
+
+/* Exam Name Builder 樣式 */
+.exam-name-builder {
+    margin-top: 15px;
+    padding: 15px;
+    background: #f8f9fa;
+    border-radius: 5px;
+    border: 1px solid #ddd;
+}
+
+.builder-group {
+    margin-bottom: 15px;
+}
+
+.builder-group:last-child {
+    margin-bottom: 0;
+}
+
+.builder-label {
+    font-size: 14px;
+    font-weight: 500;
+    color: #555;
+    margin-bottom: 8px;
+}
+
+.builder-btn {
+    padding: 6px 12px;
+    margin-right: 8px;
+    margin-bottom: 5px;
+    border: 2px solid #ddd;
+    border-radius: 4px;
+    background: white;
+    color: #555;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.builder-btn:hover {
+    border-color: #667eea;
+    background: #f0f4ff;
+}
+
+.builder-btn.active {
+    background: #667eea;
+    color: white;
+    border-color: #667eea;
+    font-weight: 500;
+}

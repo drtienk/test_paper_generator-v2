@@ -34,6 +34,28 @@
             <div class="form-group">
                 <label for="examName">考卷名稱：</label>
                 <input type="text" id="examName" placeholder="例如：Managerial Accounting" value="Managerial Accounting">
+                <div id="examNameBuilder" class="exam-name-builder" style="display: none;">
+                    <div class="builder-group" data-group="year">
+                        <div class="builder-label">Year</div>
+                        <button type="button" class="builder-btn" data-value="2026">2026</button>
+                        <button type="button" class="builder-btn" data-value="2027">2027</button>
+                        <button type="button" class="builder-btn" data-value="2028">2028</button>
+                        <button type="button" class="builder-btn" data-value="2029">2029</button>
+                        <button type="button" class="builder-btn" data-value="2030">2030</button>
+                    </div>
+                    <div class="builder-group" data-group="term">
+                        <div class="builder-label">Term</div>
+                        <button type="button" class="builder-btn" data-value="Spring">Spring</button>
+                        <button type="button" class="builder-btn" data-value="Fall">Fall</button>
+                    </div>
+                    <div class="builder-group" data-group="examType">
+                        <div class="builder-label">Exam</div>
+                        <button type="button" class="builder-btn" data-value="Exam 1">Exam 1</button>
+                        <button type="button" class="builder-btn" data-value="Exam 2">Exam 2</button>
+                        <button type="button" class="builder-btn" data-value="Exam 3">Exam 3</button>
+                        <button type="button" class="builder-btn" data-value="Final exam">Final exam</button>
+                    </div>
+                </div>
             </div>
             <div class="form-group">
                 <label>Exam Points：</label>

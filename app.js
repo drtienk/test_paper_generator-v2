@@ -19,6 +19,12 @@ const SUBJECT_CONFIG = {
 };
 let currentSubject = 'managerial';
 
+// Managerial Accounting Exam Name Builder 設定
+const MANAGERIAL_EXAMNAME_PREFIX = "ACCT 201 Managerial Accounting";
+let selectedYear = '2026';
+let selectedTerm = 'Spring';
+let selectedExamType = 'Exam 1';
+
 // ========== 全域變數 ==========
 let pdfFiles = [];
 let parsedQuestions = []; // 所有題目的陣列
@@ -1153,6 +1159,7 @@ class WordGenerator {
 const subjectSelect = document.getElementById('subjectSelect');
 const mainTitle = document.getElementById('mainTitle');
 const examNameInput = document.getElementById('examName');
+const examNameBuilder = document.getElementById('examNameBuilder');
 const pointsConfig = document.getElementById('pointsConfig');
 const addPointsRowBtn = document.getElementById('addPointsRowBtn');
 const pointsTotalDisplay = document.getElementById('pointsTotalDisplay');
@@ -1315,6 +1322,27 @@ function readExamPointsFromUI() {
     };
 }
 
+// 建立 Managerial Accounting Exam Name
+function buildManagerialExamName() {
+    return `${MANAGERIAL_EXAMNAME_PREFIX} ${selectedYear} ${selectedTerm} ${selectedExamType}`;
+}
+
+// 設定 Builder 按鈕的 active 狀態
+function setActiveButton(group, value) {
+    if (!examNameBuilder) return;
+    const groupElement = examNameBuilder.querySelector(`[data-group="${group}"]`);
+    if (!groupElement) return;
+    
+    const buttons = groupElement.querySelectorAll('.builder-btn');
+    buttons.forEach(btn => {
+        if (btn.getAttribute('data-value') === value) {
+            btn.classList.add('active');
+        } else {
+            btn.classList.remove('active');
+        }
+    });
+}
+
 // 依 currentSubject 更新標題、<title>、考卷名稱預設（僅在未自訂或等於舊預設時更新）
 function applySubjectUI(prevSubject) {
     const cfg = SUBJECT_CONFIG[currentSubject];
@@ -1322,12 +1350,40 @@ function applySubjectUI(prevSubject) {
     mainTitle.textContent = cfg.pageTitle;
     examNameInput.placeholder = '例如：' + cfg.defaultExamName;
 
-    const currentVal = (examNameInput.value || '').trim();
-    const shouldUpdateExamName = prevSubject == null ||
-        !currentVal ||
-        currentVal === (SUBJECT_CONFIG[prevSubject] && SUBJECT_CONFIG[prevSubject].defaultExamName);
-    if (shouldUpdateExamName) {
-        examNameInput.value = cfg.defaultExamName;
+    if (currentSubject === 'managerial') {
+        // 顯示 Exam Name Builder
+        if (examNameBuilder) {
+            examNameBuilder.style.display = 'block';
+        }
+        
+        // 設定預設值（如果剛切換到 managerial）
+        if (prevSubject !== 'managerial') {
+            selectedYear = '2026';
+            selectedTerm = 'Spring';
+            selectedExamType = 'Exam 1';
+        }
+        
+        // 更新按鈕 active 狀態
+        setActiveButton('year', selectedYear);
+        setActiveButton('term', selectedTerm);
+        setActiveButton('examType', selectedExamType);
+        
+        // 更新 Exam Name
+        examNameInput.value = buildManagerialExamName();
+    } else {
+        // Financial Accounting：隱藏 Builder
+        if (examNameBuilder) {
+            examNameBuilder.style.display = 'none';
+        }
+        
+        // Financial Accounting 的既有邏輯
+        const currentVal = (examNameInput.value || '').trim();
+        const shouldUpdateExamName = prevSubject == null ||
+            !currentVal ||
+            currentVal === (SUBJECT_CONFIG[prevSubject] && SUBJECT_CONFIG[prevSubject].defaultExamName);
+        if (shouldUpdateExamName) {
+            examNameInput.value = cfg.defaultExamName;
+        }
     }
 }
 
@@ -1343,6 +1399,38 @@ subjectSelect.addEventListener('change', () => {
 // Add Row 按鈕事件
 if (addPointsRowBtn) {
     addPointsRowBtn.addEventListener('click', addPointsRow);
+}
+
+// Exam Name Builder 按鈕事件（事件委派）
+if (examNameBuilder) {
+    examNameBuilder.addEventListener('click', (e) => {
+        if (e.target.classList.contains('builder-btn')) {
+            const btn = e.target;
+            const value = btn.getAttribute('data-value');
+            const groupElement = btn.closest('[data-group]');
+            
+            if (groupElement) {
+                const group = groupElement.getAttribute('data-group');
+                
+                // 更新狀態
+                if (group === 'year') {
+                    selectedYear = value;
+                } else if (group === 'term') {
+                    selectedTerm = value;
+                } else if (group === 'examType') {
+                    selectedExamType = value;
+                }
+                
+                // 更新按鈕 active 狀態
+                setActiveButton(group, value);
+                
+                // 更新 Exam Name（只在 managerial 時）
+                if (currentSubject === 'managerial') {
+                    examNameInput.value = buildManagerialExamName();
+                }
+            }
+        }
+    });
 }
 
 // 初始化 Points UI
