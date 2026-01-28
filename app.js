@@ -528,11 +528,6 @@ class WordGenerator {
 
         out.push(
             new docx.Paragraph({
-                children: [new docx.TextRun({ text: 'Managerial Accounting (ACCT 201)', bold: true, size: 28 })],
-                alignment: docx.AlignmentType.CENTER,
-                spacing: { after: 120 }
-            }),
-            new docx.Paragraph({
                 children: [new docx.TextRun({ text: 'Department of Accounting and ISA', size: 22 })],
                 alignment: docx.AlignmentType.CENTER,
                 spacing: { after: 80 }
