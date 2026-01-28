@@ -570,11 +570,11 @@ class WordGenerator {
         );
 
         const pointsTableRows = [
-            new docx.TableRow({ children: [new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'Points', bold: true })] })] }), new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'Score', bold: true })] })] })] }),
-            new docx.TableRow({ children: [new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'I.' })] })] }), new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: '150' })] })] })] }),
-            new docx.TableRow({ children: [new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'II.' })] })] }), new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: '25' })] })] })] }),
-            new docx.TableRow({ children: [new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'III.' })] })] }), new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: '25' })] })] })] }),
-            new docx.TableRow({ children: [new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'Total Points' })] })] }), new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: '200' })] })] })] })
+            new docx.TableRow({ children: [new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'Parts', bold: true })] })] }), new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'Points', bold: true })] })] }), new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'Score', bold: true })] })] })] }),
+            new docx.TableRow({ children: [new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'I.' })] })] }), new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: '150' })] })] }), new docx.TableCell({ children: [new docx.Paragraph({ children: [] })] })] }),
+            new docx.TableRow({ children: [new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'II.' })] })] }), new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: '25' })] })] }), new docx.TableCell({ children: [new docx.Paragraph({ children: [] })] })] }),
+            new docx.TableRow({ children: [new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'III.' })] })] }), new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: '25' })] })] }), new docx.TableCell({ children: [new docx.Paragraph({ children: [] })] })] }),
+            new docx.TableRow({ children: [new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'Total Points' })] })] }), new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: '200' })] })] }), new docx.TableCell({ children: [new docx.Paragraph({ children: [] })] })] })
         ];
         out.push(
             new docx.Table({
