@@ -520,7 +520,15 @@ class QuestionGenerator {
 // ========== Word 文檔生成器類別 ==========
 class WordGenerator {
     // Managerial 專用：產生封面頁元素（含答案格），傳入題目總數以決定格數
-    _buildManagerialCoverPage(questionCount, examName) {
+    _buildManagerialCoverPage(questionCount, examName, points) {
+        // 安全 fallback：如果沒有傳入 points 或欄位不存在，使用預設值
+        const defaultPoints = { i: 150, ii: 25, iii: 25, total: 200 };
+        const pts = points || defaultPoints;
+        const ptsI = (pts.i !== undefined && pts.i !== null) ? pts.i : defaultPoints.i;
+        const ptsII = (pts.ii !== undefined && pts.ii !== null) ? pts.ii : defaultPoints.ii;
+        const ptsIII = (pts.iii !== undefined && pts.iii !== null) ? pts.iii : defaultPoints.iii;
+        const ptsTotal = (pts.total !== undefined && pts.total !== null) ? pts.total : (ptsI + ptsII + ptsIII);
+        
         const out = [];
         const borderOption = (typeof docx.BorderStyle !== 'undefined')
             ? { style: docx.BorderStyle.SINGLE, size: 4 }
@@ -571,10 +579,10 @@ class WordGenerator {
 
         const pointsTableRows = [
             new docx.TableRow({ children: [new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'Parts', bold: true })] })] }), new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'Points', bold: true })] })] }), new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'Score', bold: true })] })] })] }),
-            new docx.TableRow({ children: [new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'I.' })] })] }), new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: '150' })] })] }), new docx.TableCell({ children: [new docx.Paragraph({ children: [] })] })] }),
-            new docx.TableRow({ children: [new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'II.' })] })] }), new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: '25' })] })] }), new docx.TableCell({ children: [new docx.Paragraph({ children: [] })] })] }),
-            new docx.TableRow({ children: [new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'III.' })] })] }), new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: '25' })] })] }), new docx.TableCell({ children: [new docx.Paragraph({ children: [] })] })] }),
-            new docx.TableRow({ children: [new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'Total Points' })] })] }), new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: '200' })] })] }), new docx.TableCell({ children: [new docx.Paragraph({ children: [] })] })] })
+            new docx.TableRow({ children: [new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'I.' })] })] }), new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: String(ptsI) })] })] }), new docx.TableCell({ children: [new docx.Paragraph({ children: [] })] })] }),
+            new docx.TableRow({ children: [new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'II.' })] })] }), new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: String(ptsII) })] })] }), new docx.TableCell({ children: [new docx.Paragraph({ children: [] })] })] }),
+            new docx.TableRow({ children: [new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'III.' })] })] }), new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: String(ptsIII) })] })] }), new docx.TableCell({ children: [new docx.Paragraph({ children: [] })] })] }),
+            new docx.TableRow({ children: [new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'Total Points' })] })] }), new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: String(ptsTotal) })] })] }), new docx.TableCell({ children: [new docx.Paragraph({ children: [] })] })] })
         ];
         out.push(
             new docx.Table({
@@ -705,12 +713,12 @@ class WordGenerator {
     }
 
     // 生成題目卷（學生用）
-    async generateQuestionSheet(examName, questions) {
+    async generateQuestionSheet(examName, questions, points) {
         // 所有內容將添加到同一個 section，確保連續流動
         const allChildren = [];
 
         if (currentSubject === 'managerial') {
-            allChildren.push(...this._buildManagerialCoverPage(questions.length, examName));
+            allChildren.push(...this._buildManagerialCoverPage(questions.length, examName, points));
         }
         
         // 1. 標題
@@ -1026,6 +1034,10 @@ class WordGenerator {
 const subjectSelect = document.getElementById('subjectSelect');
 const mainTitle = document.getElementById('mainTitle');
 const examNameInput = document.getElementById('examName');
+const pointsIInput = document.getElementById('pointsIInput');
+const pointsIIInput = document.getElementById('pointsIIInput');
+const pointsIIIInput = document.getElementById('pointsIIIInput');
+const pointsTotalDisplay = document.getElementById('pointsTotalDisplay');
 const uploadArea = document.getElementById('uploadArea');
 const pdfInput = document.getElementById('pdfInput');
 const fileList = document.getElementById('fileList');
@@ -1035,6 +1047,21 @@ const parsedQuestionsDiv = document.getElementById('parsedQuestions');
 const generateSection = document.getElementById('generateSection');
 const generateBtn = document.getElementById('generateBtn');
 const generateStatus = document.getElementById('generateStatus');
+
+// 讀取 Exam Points 從 UI（並更新 total 顯示）
+function readExamPointsFromUI() {
+    const i = parseInt(pointsIInput ? pointsIInput.value : '150', 10) || 0;
+    const ii = parseInt(pointsIIInput ? pointsIIInput.value : '25', 10) || 0;
+    const iii = parseInt(pointsIIIInput ? pointsIIIInput.value : '25', 10) || 0;
+    const total = i + ii + iii;
+    
+    // 更新 total 顯示
+    if (pointsTotalDisplay) {
+        pointsTotalDisplay.value = total.toString();
+    }
+    
+    return { i, ii, iii, total };
+}
 
 // 依 currentSubject 更新標題、<title>、考卷名稱預設（僅在未自訂或等於舊預設時更新）
 function applySubjectUI(prevSubject) {
@@ -1060,6 +1087,20 @@ subjectSelect.addEventListener('change', () => {
     currentSubject = subjectSelect.value;
     applySubjectUI(prev);
 });
+
+// Exam Points 輸入欄位變動時即時更新 total
+if (pointsIInput) {
+    pointsIInput.addEventListener('input', readExamPointsFromUI);
+    pointsIInput.addEventListener('change', readExamPointsFromUI);
+}
+if (pointsIIInput) {
+    pointsIIInput.addEventListener('input', readExamPointsFromUI);
+    pointsIIInput.addEventListener('change', readExamPointsFromUI);
+}
+if (pointsIIIInput) {
+    pointsIIIInput.addEventListener('input', readExamPointsFromUI);
+    pointsIIIInput.addEventListener('change', readExamPointsFromUI);
+}
 
 // 初始化解析器
 parser = new PDFParser();
@@ -1364,11 +1405,14 @@ generateBtn.addEventListener('click', async () => {
             q.examNumber = index + 1;
         });
 
+        // 讀取 Exam Points（僅 Managerial Accounting 需要）
+        const examPoints = (currentSubject === 'managerial') ? readExamPointsFromUI() : null;
+        
         // 生成 Word 文檔
         const wordGen = new WordGenerator();
         
         console.log('Generating Questions doc...');
-        const questionBlob = await wordGen.generateQuestionSheet(examName, examQuestions);
+        const questionBlob = await wordGen.generateQuestionSheet(examName, examQuestions, examPoints);
         console.log('Questions doc generated');
         
         console.log('Generating Answers doc...');
