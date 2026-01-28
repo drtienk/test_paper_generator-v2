@@ -521,13 +521,21 @@ class QuestionGenerator {
 class WordGenerator {
     // Managerial 專用：產生封面頁元素（含答案格），傳入題目總數以決定格數
     _buildManagerialCoverPage(questionCount, examName, points) {
-        // 安全 fallback：如果沒有傳入 points 或欄位不存在，使用預設值
-        const defaultPoints = { i: 150, ii: 25, iii: 25, total: 200 };
-        const pts = points || defaultPoints;
-        const ptsI = (pts.i !== undefined && pts.i !== null) ? pts.i : defaultPoints.i;
-        const ptsII = (pts.ii !== undefined && pts.ii !== null) ? pts.ii : defaultPoints.ii;
-        const ptsIII = (pts.iii !== undefined && pts.iii !== null) ? pts.iii : defaultPoints.iii;
-        const ptsTotal = (pts.total !== undefined && pts.total !== null) ? pts.total : (ptsI + ptsII + ptsIII);
+        // 安全 fallback：如果沒有傳入 points 或 rows 不存在，使用預設值
+        const defaultRows = [
+            { label: "I", value: 150 },
+            { label: "II", value: 25 },
+            { label: "III", value: 25 }
+        ];
+        const defaultTotal = 200;
+        
+        // 優先使用 points.rows，否則 fallback 到預設
+        let ptsRows = (points && points.rows && Array.isArray(points.rows) && points.rows.length > 0) 
+            ? points.rows 
+            : defaultRows;
+        const ptsTotal = (points && points.total !== undefined && points.total !== null) 
+            ? points.total 
+            : defaultTotal;
         
         const out = [];
         const borderOption = (typeof docx.BorderStyle !== 'undefined')
@@ -577,13 +585,43 @@ class WordGenerator {
             })
         );
 
+        // 動態生成 Points 表格列
         const pointsTableRows = [
-            new docx.TableRow({ children: [new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'Parts', bold: true })] })] }), new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'Points', bold: true })] })] }), new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'Score', bold: true })] })] })] }),
-            new docx.TableRow({ children: [new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'I.' })] })] }), new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: String(ptsI) })] })] }), new docx.TableCell({ children: [new docx.Paragraph({ children: [] })] })] }),
-            new docx.TableRow({ children: [new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'II.' })] })] }), new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: String(ptsII) })] })] }), new docx.TableCell({ children: [new docx.Paragraph({ children: [] })] })] }),
-            new docx.TableRow({ children: [new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'III.' })] })] }), new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: String(ptsIII) })] })] }), new docx.TableCell({ children: [new docx.Paragraph({ children: [] })] })] }),
-            new docx.TableRow({ children: [new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'Total Points' })] })] }), new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: String(ptsTotal) })] })] }), new docx.TableCell({ children: [new docx.Paragraph({ children: [] })] })] })
+            // 表頭
+            new docx.TableRow({ 
+                children: [
+                    new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'Parts', bold: true })] })] }), 
+                    new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'Points', bold: true })] })] }), 
+                    new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'Score', bold: true })] })] })
+                ] 
+            })
         ];
+        
+        // 動態生成每一列（依 ptsRows）
+        ptsRows.forEach(row => {
+            const label = row.label || '';
+            const value = (row.value !== undefined && row.value !== null) ? row.value : 0;
+            pointsTableRows.push(
+                new docx.TableRow({ 
+                    children: [
+                        new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: label + '.' })] })] }), 
+                        new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: String(value) })] })] }), 
+                        new docx.TableCell({ children: [new docx.Paragraph({ children: [] })] })
+                    ] 
+                })
+            );
+        });
+        
+        // Total Points 列
+        pointsTableRows.push(
+            new docx.TableRow({ 
+                children: [
+                    new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'Total Points' })] })] }), 
+                    new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: String(ptsTotal) })] })] }), 
+                    new docx.TableCell({ children: [new docx.Paragraph({ children: [] })] })
+                ] 
+            })
+        );
         out.push(
             new docx.Table({
                 rows: pointsTableRows,
@@ -1034,9 +1072,8 @@ class WordGenerator {
 const subjectSelect = document.getElementById('subjectSelect');
 const mainTitle = document.getElementById('mainTitle');
 const examNameInput = document.getElementById('examName');
-const pointsIInput = document.getElementById('pointsIInput');
-const pointsIIInput = document.getElementById('pointsIIInput');
-const pointsIIIInput = document.getElementById('pointsIIIInput');
+const pointsConfig = document.getElementById('pointsConfig');
+const addPointsRowBtn = document.getElementById('addPointsRowBtn');
 const pointsTotalDisplay = document.getElementById('pointsTotalDisplay');
 const uploadArea = document.getElementById('uploadArea');
 const pdfInput = document.getElementById('pdfInput');
@@ -1048,19 +1085,153 @@ const generateSection = document.getElementById('generateSection');
 const generateBtn = document.getElementById('generateBtn');
 const generateStatus = document.getElementById('generateStatus');
 
-// 讀取 Exam Points 從 UI（並更新 total 顯示）
-function readExamPointsFromUI() {
-    const i = parseInt(pointsIInput ? pointsIInput.value : '150', 10) || 0;
-    const ii = parseInt(pointsIIInput ? pointsIIInput.value : '25', 10) || 0;
-    const iii = parseInt(pointsIIIInput ? pointsIIIInput.value : '25', 10) || 0;
-    const total = i + ii + iii;
+// Points Rows 資料結構（羅馬數字 I-X）
+let pointsRows = [
+    { label: "I", value: 150 },
+    { label: "II", value: 25 },
+    { label: "III", value: 25 }
+];
+
+// 羅馬數字對應表（I 到 X）
+const ROMAN_NUMERALS = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"];
+
+// 計算總分
+function computeTotalPoints() {
+    return pointsRows.reduce((sum, row) => {
+        const val = parseInt(row.value, 10) || 0;
+        return sum + (val >= 0 ? val : 0);
+    }, 0);
+}
+
+// 渲染 Points 設定 UI
+function renderPointsConfigUI() {
+    if (!pointsConfig) return;
     
-    // 更新 total 顯示
+    // 重新編號所有列，確保 label 連續（I, II, III...）
+    pointsRows.forEach((row, index) => {
+        row.label = ROMAN_NUMERALS[index];
+    });
+    
+    pointsConfig.innerHTML = '';
+    
+    const container = document.createElement('div');
+    container.style.display = 'flex';
+    container.style.gap = '15px';
+    container.style.alignItems = 'center';
+    container.style.flexWrap = 'wrap';
+    
+    pointsRows.forEach((row, index) => {
+        const rowDiv = document.createElement('div');
+        rowDiv.style.display = 'flex';
+        rowDiv.style.alignItems = 'center';
+        rowDiv.style.gap = '5px';
+        
+        const label = document.createElement('label');
+        label.textContent = row.label + '：';
+        label.style.fontSize = '14px';
+        label.style.color = '#555';
+        
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.min = '0';
+        input.step = '1';
+        input.value = row.value;
+        input.style.width = '80px';
+        input.style.padding = '5px';
+        input.style.border = '2px solid #ddd';
+        input.style.borderRadius = '4px';
+        input.style.textAlign = 'center';
+        input.id = `pointsInput_${index}`;
+        
+        // 輸入變更時更新資料並重新計算總分
+        input.addEventListener('input', () => {
+            const val = parseInt(input.value, 10) || 0;
+            pointsRows[index].value = val >= 0 ? val : 0;
+            updateTotalDisplay();
+        });
+        input.addEventListener('change', () => {
+            const val = parseInt(input.value, 10) || 0;
+            pointsRows[index].value = val >= 0 ? val : 0;
+            updateTotalDisplay();
+        });
+        
+        const removeBtn = document.createElement('button');
+        removeBtn.textContent = 'X';
+        removeBtn.style.padding = '3px 8px';
+        removeBtn.style.background = '#ff4757';
+        removeBtn.style.color = 'white';
+        removeBtn.style.border = 'none';
+        removeBtn.style.borderRadius = '3px';
+        removeBtn.style.cursor = 'pointer';
+        removeBtn.style.fontSize = '12px';
+        
+        // 刪除列（至少保留 2 列）
+        removeBtn.addEventListener('click', () => {
+            if (pointsRows.length > 2) {
+                pointsRows.splice(index, 1);
+                renderPointsConfigUI();
+                updateTotalDisplay();
+            }
+        });
+        
+        // 當列數 <= 2 時禁用刪除按鈕
+        if (pointsRows.length <= 2) {
+            removeBtn.disabled = true;
+            removeBtn.style.opacity = '0.5';
+            removeBtn.style.cursor = 'not-allowed';
+        }
+        
+        rowDiv.appendChild(label);
+        rowDiv.appendChild(input);
+        rowDiv.appendChild(removeBtn);
+        container.appendChild(rowDiv);
+    });
+    
+    pointsConfig.appendChild(container);
+    
+    // 更新 Add Row 按鈕狀態（最多 10 列）
+    if (addPointsRowBtn) {
+        addPointsRowBtn.disabled = pointsRows.length >= 10;
+        if (pointsRows.length >= 10) {
+            addPointsRowBtn.style.opacity = '0.5';
+            addPointsRowBtn.style.cursor = 'not-allowed';
+        } else {
+            addPointsRowBtn.style.opacity = '1';
+            addPointsRowBtn.style.cursor = 'pointer';
+        }
+    }
+}
+
+// 更新總分顯示
+function updateTotalDisplay() {
     if (pointsTotalDisplay) {
+        const total = computeTotalPoints();
         pointsTotalDisplay.value = total.toString();
     }
+}
+
+// 新增 Points 列
+function addPointsRow() {
+    if (pointsRows.length >= 10) return;
     
-    return { i, ii, iii, total };
+    // 新增列時，label 會在 renderPointsConfigUI() 中自動重新編號
+    pointsRows.push({ label: "", value: 0 });
+    renderPointsConfigUI();
+    updateTotalDisplay();
+}
+
+// 讀取 Exam Points 從 UI（並更新 total 顯示）
+function readExamPointsFromUI() {
+    const total = computeTotalPoints();
+    
+    // 更新 total 顯示
+    updateTotalDisplay();
+    
+    // 返回 pointsRows 陣列和 total（用於 DOCX 生成）
+    return {
+        rows: pointsRows.map(row => ({ label: row.label, value: row.value })),
+        total: total
+    };
 }
 
 // 依 currentSubject 更新標題、<title>、考卷名稱預設（僅在未自訂或等於舊預設時更新）
@@ -1088,19 +1259,14 @@ subjectSelect.addEventListener('change', () => {
     applySubjectUI(prev);
 });
 
-// Exam Points 輸入欄位變動時即時更新 total
-if (pointsIInput) {
-    pointsIInput.addEventListener('input', readExamPointsFromUI);
-    pointsIInput.addEventListener('change', readExamPointsFromUI);
+// Add Row 按鈕事件
+if (addPointsRowBtn) {
+    addPointsRowBtn.addEventListener('click', addPointsRow);
 }
-if (pointsIIInput) {
-    pointsIIInput.addEventListener('input', readExamPointsFromUI);
-    pointsIIInput.addEventListener('change', readExamPointsFromUI);
-}
-if (pointsIIIInput) {
-    pointsIIIInput.addEventListener('input', readExamPointsFromUI);
-    pointsIIIInput.addEventListener('change', readExamPointsFromUI);
-}
+
+// 初始化 Points UI
+renderPointsConfigUI();
+updateTotalDisplay();
 
 // 初始化解析器
 parser = new PDFParser();
