@@ -519,6 +519,39 @@ class QuestionGenerator {
 
 // ========== Word 文檔生成器類別 ==========
 class WordGenerator {
+    // Helper：建立封面頁表格的置中且字體放大的 TableCell
+    _buildCoverTableCell(text, isBold = false) {
+        const fontSize = 26; // 封面頁表格字體大小（明顯放大）
+        return new docx.TableCell({
+            verticalAlignment: docx.VerticalAlign.CENTER,
+            children: [
+                new docx.Paragraph({
+                    alignment: docx.AlignmentType.CENTER,
+                    children: [
+                        new docx.TextRun({
+                            text: text || '',
+                            size: fontSize,
+                            bold: isBold
+                        })
+                    ]
+                })
+            ]
+        });
+    }
+
+    // Helper：建立封面頁表格的空白置中 TableCell（用於 Score 欄或答案格）
+    _buildCoverEmptyCell() {
+        return new docx.TableCell({
+            verticalAlignment: docx.VerticalAlign.CENTER,
+            children: [
+                new docx.Paragraph({
+                    alignment: docx.AlignmentType.CENTER,
+                    children: []
+                })
+            ]
+        });
+    }
+
     // Managerial 專用：產生封面頁元素（含答案格），傳入題目總數以決定格數
     _buildManagerialCoverPage(questionCount, examName, points) {
         // 安全 fallback：如果沒有傳入 points 或 rows 不存在，使用預設值
@@ -595,9 +628,9 @@ class WordGenerator {
             new docx.TableRow({ 
                 height: { value: COVER_POINTS_ROW_HEIGHT, rule: docx.HeightRule.EXACT },
                 children: [
-                    new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'Parts', bold: true })] })] }), 
-                    new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'Points', bold: true })] })] }), 
-                    new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'Score', bold: true })] })] })
+                    this._buildCoverTableCell('Parts', true),
+                    this._buildCoverTableCell('Points', true),
+                    this._buildCoverTableCell('Score', true)
                 ] 
             })
         ];
@@ -610,9 +643,9 @@ class WordGenerator {
                 new docx.TableRow({ 
                     height: { value: COVER_POINTS_ROW_HEIGHT, rule: docx.HeightRule.EXACT },
                     children: [
-                        new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: label + '.' })] })] }), 
-                        new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: String(value) })] })] }), 
-                        new docx.TableCell({ children: [new docx.Paragraph({ children: [] })] })
+                        this._buildCoverTableCell(label + '.'),
+                        this._buildCoverTableCell(String(value)),
+                        this._buildCoverEmptyCell()
                     ] 
                 })
             );
@@ -623,9 +656,9 @@ class WordGenerator {
             new docx.TableRow({ 
                 height: { value: COVER_POINTS_ROW_HEIGHT, rule: docx.HeightRule.EXACT },
                 children: [
-                    new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'Total Points' })] })] }), 
-                    new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: String(ptsTotal) })] })] }), 
-                    new docx.TableCell({ children: [new docx.Paragraph({ children: [] })] })
+                    this._buildCoverTableCell('Total Points'),
+                    this._buildCoverTableCell(String(ptsTotal)),
+                    this._buildCoverEmptyCell()
                 ] 
             })
         );
@@ -668,26 +701,53 @@ class WordGenerator {
         const cols = 10;
         const blockCount = Math.ceil(questionCount / cols);
         const gridRows = [];
+        const coverGridFontSize = 26; // Answer Grid 字體大小（與 Points 表格一致）
         for (let b = 0; b < blockCount; b++) {
             const qCells = [new docx.TableCell({
-                children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'Q.', size: 18 })] })],
+                verticalAlignment: docx.VerticalAlign.CENTER,
+                children: [
+                    new docx.Paragraph({
+                        alignment: docx.AlignmentType.CENTER,
+                        children: [new docx.TextRun({ text: 'Q.', size: coverGridFontSize })]
+                    })
+                ],
                 width: { size: 8, type: docx.WidthType.PERCENTAGE }
             })];
             const aCells = [new docx.TableCell({
-                children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'A.', size: 18 })] })],
+                verticalAlignment: docx.VerticalAlign.CENTER,
+                children: [
+                    new docx.Paragraph({
+                        alignment: docx.AlignmentType.CENTER,
+                        children: [new docx.TextRun({ text: 'A.', size: coverGridFontSize })]
+                    })
+                ],
                 width: { size: 8, type: docx.WidthType.PERCENTAGE }
             })];
             for (let c = 0; c < cols; c++) {
                 const num = b * cols + c + 1;
                 qCells.push(new docx.TableCell({
-                    children: [new docx.Paragraph({
-                        children: [new docx.TextRun({ text: num <= questionCount ? String(num) : '', size: 18 })],
-                        alignment: docx.AlignmentType.CENTER
-                    })],
+                    verticalAlignment: docx.VerticalAlign.CENTER,
+                    children: [
+                        new docx.Paragraph({
+                            alignment: docx.AlignmentType.CENTER,
+                            children: [
+                                new docx.TextRun({
+                                    text: num <= questionCount ? String(num) : '',
+                                    size: coverGridFontSize
+                                })
+                            ]
+                        })
+                    ],
                     width: { size: (92 / cols), type: docx.WidthType.PERCENTAGE }
                 }));
                 aCells.push(new docx.TableCell({
-                    children: [new docx.Paragraph({ children: [] })],
+                    verticalAlignment: docx.VerticalAlign.CENTER,
+                    children: [
+                        new docx.Paragraph({
+                            alignment: docx.AlignmentType.CENTER,
+                            children: []
+                        })
+                    ],
                     width: { size: (92 / cols), type: docx.WidthType.PERCENTAGE }
                 }));
             }
