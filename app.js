@@ -702,17 +702,21 @@ class WordGenerator {
         const blockCount = Math.ceil(questionCount / cols);
         const gridRows = [];
         const coverGridFontSize = 26; // Answer Grid 字體大小（與 Points 表格一致）
+        const questionRowShading = { fill: "EDEDED" }; // 題號列淺灰色背景
         for (let b = 0; b < blockCount; b++) {
+            // Q. row（題號列）：加上淺灰背景和粗體文字
             const qCells = [new docx.TableCell({
                 verticalAlignment: docx.VerticalAlign.CENTER,
+                shading: questionRowShading,
                 children: [
                     new docx.Paragraph({
                         alignment: docx.AlignmentType.CENTER,
-                        children: [new docx.TextRun({ text: 'Q.', size: coverGridFontSize })]
+                        children: [new docx.TextRun({ text: 'Q.', size: coverGridFontSize, bold: true })]
                     })
                 ],
                 width: { size: 8, type: docx.WidthType.PERCENTAGE }
             })];
+            // A. row（答案列）：維持原樣，不加背景色或粗體
             const aCells = [new docx.TableCell({
                 verticalAlignment: docx.VerticalAlign.CENTER,
                 children: [
@@ -725,21 +729,25 @@ class WordGenerator {
             })];
             for (let c = 0; c < cols; c++) {
                 const num = b * cols + c + 1;
+                // Q. row 的題號 cell：加上淺灰背景和粗體文字
                 qCells.push(new docx.TableCell({
                     verticalAlignment: docx.VerticalAlign.CENTER,
+                    shading: questionRowShading,
                     children: [
                         new docx.Paragraph({
                             alignment: docx.AlignmentType.CENTER,
                             children: [
                                 new docx.TextRun({
                                     text: num <= questionCount ? String(num) : '',
-                                    size: coverGridFontSize
+                                    size: coverGridFontSize,
+                                    bold: true
                                 })
                             ]
                         })
                     ],
                     width: { size: (92 / cols), type: docx.WidthType.PERCENTAGE }
                 }));
+                // A. row 的答案格：維持原樣，不加背景色
                 aCells.push(new docx.TableCell({
                     verticalAlignment: docx.VerticalAlign.CENTER,
                     children: [
