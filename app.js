@@ -1224,6 +1224,27 @@ class WordGenerator {
         // 所有答案添加到同一個 section，讓 Word 自然處理分頁
         // 使用相同的問題物件，確保與題目卷完全一致
         const answerChildren = [];
+
+        // 將多行文字（含 \n）轉成逐行 Paragraph（保留空白行）
+        // 僅供答案卷 EX 題排版使用，避免影響既有 MC / Financial 行為
+        const makeParagraphsFromLines = (text, paragraphOptions) => {
+            const opts = paragraphOptions || {};
+            const normalized = (text == null ? '' : String(text)).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+            const lines = normalized.split('\n');
+            const out = [];
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                if (line === '') {
+                    out.push(new docx.Paragraph({ children: [], ...opts }));
+                } else {
+                    out.push(new docx.Paragraph({
+                        children: [new docx.TextRun({ text: line.replace(/\s+$/g, ''), size: 20 })],
+                        ...opts
+                    }));
+                }
+            }
+            return out;
+        };
         
         // 添加摘要表格標題
         answerChildren.push(
@@ -1400,22 +1421,14 @@ class WordGenerator {
                     })
                 );
 
-                // 2. 題目敘述（promptText）
+                // 2. 題目敘述（promptText）- 逐行輸出
                 if (ex.promptText && ex.promptText.trim()) {
-                    answerChildren.push(
-                        new docx.Paragraph({
-                            children: [
-                                new docx.TextRun({
-                                    text: ex.promptText.trim(),
-                                    size: 20
-                                })
-                            ],
-                            spacing: { after: 100 }
-                        })
-                    );
+                    answerChildren.push(...makeParagraphsFromLines(ex.promptText, {
+                        spacing: { after: 80 }
+                    }));
                 }
 
-                // 3. Required 區塊
+                // 3. Required 區塊 - 逐行輸出
                 if (ex.requiredText && ex.requiredText.trim()) {
                     answerChildren.push(
                         new docx.Paragraph({
@@ -1427,21 +1440,15 @@ class WordGenerator {
                                 })
                             ],
                             spacing: { after: 50 }
-                        }),
-                        new docx.Paragraph({
-                            children: [
-                                new docx.TextRun({
-                                    text: ex.requiredText.trim(),
-                                    size: 20
-                                })
-                            ],
-                            spacing: { after: 100 },
-                            indent: { left: 400 }
                         })
                     );
+                    answerChildren.push(...makeParagraphsFromLines(ex.requiredText, {
+                        spacing: { after: 80 },
+                        indent: { left: 400 }
+                    }));
                 }
 
-                // 4. 答案內容（answerTextOrTokens）
+                // 4. 答案內容（answerTextOrTokens）- 逐行輸出
                 if (ex.answerTextOrTokens && ex.answerTextOrTokens.trim()) {
                     answerChildren.push(
                         new docx.Paragraph({
@@ -1453,18 +1460,12 @@ class WordGenerator {
                                 })
                             ],
                             spacing: { after: 50 }
-                        }),
-                        new docx.Paragraph({
-                            children: [
-                                new docx.TextRun({
-                                    text: ex.answerTextOrTokens.trim(),
-                                    size: 20
-                                })
-                            ],
-                            spacing: { after: 100 },
-                            indent: { left: 400 }
                         })
                     );
+                    answerChildren.push(...makeParagraphsFromLines(ex.answerTextOrTokens, {
+                        spacing: { after: 80 },
+                        indent: { left: 400 }
+                    }));
                 }
 
                 // 5. 完整原始文字區塊（包含 Feedback/Solution/Check My Work/Post-Submission 等）
@@ -1472,7 +1473,7 @@ class WordGenerator {
                 if (ex.rawBlockText && ex.rawBlockText.trim()) {
                     const rawText = ex.rawBlockText.trim();
                     
-                    // 提取 Feedback 區塊
+                    // 提取 Feedback 區塊 - 逐行輸出
                     const feedbackMatch = rawText.match(/Feedback\s+(.+?)(?=Post-Submission|Check My Work|Solution|$)/is);
                     if (feedbackMatch && feedbackMatch[1]) {
                         const feedbackContent = feedbackMatch[1].trim();
@@ -1487,22 +1488,16 @@ class WordGenerator {
                                         })
                                     ],
                                     spacing: { after: 50 }
-                                }),
-                                new docx.Paragraph({
-                                    children: [
-                                        new docx.TextRun({
-                                            text: feedbackContent,
-                                            size: 20
-                                        })
-                                    ],
-                                    spacing: { after: 100 },
-                                    indent: { left: 400 }
                                 })
                             );
+                            answerChildren.push(...makeParagraphsFromLines(feedbackContent, {
+                                spacing: { after: 80 },
+                                indent: { left: 400 }
+                            }));
                         }
                     }
 
-                    // 提取 Solution 區塊
+                    // 提取 Solution 區塊 - 逐行輸出
                     const solutionMatch = rawText.match(/Solution\s+(.+?)(?=Feedback|Post-Submission|Check My Work|$)/is);
                     if (solutionMatch && solutionMatch[1]) {
                         const solutionContent = solutionMatch[1].trim();
@@ -1517,22 +1512,16 @@ class WordGenerator {
                                         })
                                     ],
                                     spacing: { after: 50 }
-                                }),
-                                new docx.Paragraph({
-                                    children: [
-                                        new docx.TextRun({
-                                            text: solutionContent,
-                                            size: 20
-                                        })
-                                    ],
-                                    spacing: { after: 100 },
-                                    indent: { left: 400 }
                                 })
                             );
+                            answerChildren.push(...makeParagraphsFromLines(solutionContent, {
+                                spacing: { after: 80 },
+                                indent: { left: 400 }
+                            }));
                         }
                     }
 
-                    // 提取 Check My Work 區塊
+                    // 提取 Check My Work 區塊 - 逐行輸出
                     const checkMatch = rawText.match(/Check My Work\s+(.+?)(?=Feedback|Post-Submission|Solution|$)/is);
                     if (checkMatch && checkMatch[1]) {
                         const checkContent = checkMatch[1].trim();
@@ -1547,22 +1536,16 @@ class WordGenerator {
                                         })
                                     ],
                                     spacing: { after: 50 }
-                                }),
-                                new docx.Paragraph({
-                                    children: [
-                                        new docx.TextRun({
-                                            text: checkContent,
-                                            size: 20
-                                        })
-                                    ],
-                                    spacing: { after: 100 },
-                                    indent: { left: 400 }
                                 })
                             );
+                            answerChildren.push(...makeParagraphsFromLines(checkContent, {
+                                spacing: { after: 80 },
+                                indent: { left: 400 }
+                            }));
                         }
                     }
 
-                    // 提取 Post-Submission 區塊
+                    // 提取 Post-Submission 區塊 - 逐行輸出
                     const postMatch = rawText.match(/Post-Submission\s+(.+?)(?=Feedback|Check My Work|Solution|$)/is);
                     if (postMatch && postMatch[1]) {
                         const postContent = postMatch[1].trim();
@@ -1577,18 +1560,12 @@ class WordGenerator {
                                         })
                                     ],
                                     spacing: { after: 50 }
-                                }),
-                                new docx.Paragraph({
-                                    children: [
-                                        new docx.TextRun({
-                                            text: postContent,
-                                            size: 20
-                                        })
-                                    ],
-                                    spacing: { after: 100 },
-                                    indent: { left: 400 }
                                 })
                             );
+                            answerChildren.push(...makeParagraphsFromLines(postContent, {
+                                spacing: { after: 80 },
+                                indent: { left: 400 }
+                            }));
                         }
                     }
                 }
