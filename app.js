@@ -34,6 +34,11 @@ let exRequestedCountsByFileIndex = []; // 使用者對每檔案設定的 EX 題�
 let parser = null;
 let generator = null;
 
+// Word 非選擇題題庫（僅 Managerial）
+let wordFile = null;
+let wordNonMcQuestions = [];
+let wordParseState = 'idle'; // 'idle' | 'parsing' | 'parsed' | 'error'
+
 // ========== PDF 解析器類別 ==========
 class PDFParser {
     static FINANCIAL_SYMBOLS = {
@@ -629,6 +634,112 @@ class QuestionGenerator {
     }
 }
 
+// ========== Word 非選擇題題庫解析 ==========
+const WORD_Q_START_REGEX = /^\s*(\d{1,4})\.\s+/;
+const WORD_ANSWER_MARKER = 'ANSWER:';
+
+function parseWordQuestions(lines) {
+    const questions = [];
+    const starts = [];
+    for (let i = 0; i < lines.length; i++) {
+        const m = String(lines[i] || '').match(WORD_Q_START_REGEX);
+        if (m) starts.push({ index: i, id: m[1] });
+    }
+    for (let s = 0; s < starts.length; s++) {
+        const from = starts[s].index;
+        const to = s < starts.length - 1 ? starts[s + 1].index : lines.length;
+        const rawLines = lines.slice(from, to).map(l => (l == null ? '' : String(l)));
+        const originalId = starts[s].id;
+        let questionLines = [];
+        let answerLines = [];
+        let hasAnswerSection = false;
+        for (let i = 0; i < rawLines.length; i++) {
+            const idx = rawLines[i].indexOf(WORD_ANSWER_MARKER);
+            if (idx !== -1) {
+                hasAnswerSection = true;
+                const before = rawLines[i].substring(0, idx).replace(/\s+$/, '');
+                if (before) questionLines.push(before);
+                const after = rawLines[i].substring(idx + WORD_ANSWER_MARKER.length).replace(/^\s+/, '');
+                if (after) answerLines.push(after);
+                for (let j = i + 1; j < rawLines.length; j++) {
+                    answerLines.push(rawLines[j]);
+                }
+                break;
+            }
+            questionLines.push(rawLines[i]);
+        }
+        if (!hasAnswerSection) {
+            questionLines = rawLines;
+        }
+        questions.push({
+            source: 'word',
+            originalId,
+            questionLines,
+            answerLines,
+            hasAnswerSection,
+            rawLines
+        });
+    }
+    return questions;
+}
+
+async function parseWordFile(file) {
+    if (!file || !file.name.toLowerCase().endsWith('.docx')) return;
+    wordParseState = 'parsing';
+    wordFile = file;
+    wordNonMcQuestions = [];
+    updateWordParseUI();
+    try {
+        const arrayBuffer = await file.arrayBuffer();
+        const result = await mammoth.convertToHtml({ arrayBuffer });
+        const html = result.value || '';
+        const div = document.createElement('div');
+        div.innerHTML = html;
+        const paragraphs = div.querySelectorAll('p');
+        const lines = Array.from(paragraphs).map(p => (p.textContent || '').replace(/\s+$/g, ''));
+        wordNonMcQuestions = parseWordQuestions(lines);
+        wordParseState = 'parsed';
+    } catch (e) {
+        wordParseState = 'error';
+        console.error('Word parse error:', e);
+    }
+    updateWordParseUI();
+}
+
+function updateWordParseUI() {
+    if (!wordParseStatus) return;
+    if (wordParseState === 'idle') {
+        wordParseStatus.textContent = '';
+        if (wordConfig) wordConfig.style.display = 'none';
+        return;
+    }
+    if (wordParseState === 'parsing') {
+        wordParseStatus.textContent = 'Parsing...';
+        wordParseStatus.style.color = '#667eea';
+        if (wordConfig) wordConfig.style.display = 'none';
+        return;
+    }
+    if (wordParseState === 'error') {
+        wordParseStatus.textContent = 'Error';
+        wordParseStatus.style.color = '#c00';
+        if (wordConfig) wordConfig.style.display = 'none';
+        return;
+    }
+    wordParseStatus.textContent = 'Parsed';
+    wordParseStatus.style.color = '#0a0';
+    if (wordFileNameSpan) wordFileNameSpan.textContent = wordFile ? wordFile.name : '';
+    if (wordAvailableSpan) wordAvailableSpan.textContent = String(wordNonMcQuestions.length);
+    if (wordConfig) wordConfig.style.display = 'block';
+    if (wordRequestedInput) {
+        const n = wordNonMcQuestions.length;
+        wordRequestedInput.max = n;
+        let v = parseInt(wordRequestedInput.value, 10);
+        if (isNaN(v) || v < 0) v = 0;
+        if (v > n) v = n;
+        wordRequestedInput.value = String(v);
+    }
+}
+
 // ========== Word 文檔生成器類別 ==========
 class WordGenerator {
     // Helper：建立封面頁表格的置中且字體放大的 TableCell
@@ -944,7 +1055,7 @@ class WordGenerator {
     }
 
     // 生成題目卷（學生用）
-    async generateQuestionSheet(examName, questions, points, exSelectedAll = []) {
+    async generateQuestionSheet(examName, questions, points, exSelectedAll = [], wordNonMcSelected = []) {
         // 所有內容將添加到同一個 section，確保連續流動
         const allChildren = [];
 
@@ -1316,6 +1427,49 @@ class WordGenerator {
             });
         }
 
+        // Word 非選擇題區塊（僅 Managerial，放在 MC/EX 之後）
+        if (currentSubject === 'managerial' && wordNonMcSelected && wordNonMcSelected.length > 0) {
+            allChildren.push(
+                new docx.Paragraph({
+                    children: [
+                        new docx.TextRun({
+                            text: 'II. NON-MULTIPLE-CHOICE (Word)',
+                            bold: true,
+                            size: 22
+                        })
+                    ],
+                    spacing: { before: 400, after: 200 }
+                })
+            );
+            wordNonMcSelected.forEach((w, idx) => {
+                if (idx > 0) {
+                    allChildren.push(new docx.Paragraph({ children: [], spacing: { before: 300, after: 0 } }));
+                }
+                const qLines = w.questionLines || [];
+                const lineOpts = { spacing: { after: 80 } };
+                if (qLines.length > 0) {
+                    const text = qLines.map(l => (l == null ? '' : String(l))).join('\n');
+                    allChildren.push(...toParagraphsByLine(text, lineOpts));
+                } else {
+                    allChildren.push(
+                        new docx.Paragraph({
+                            children: [new docx.TextRun({ text: `${w.originalId}.`, size: 22 })],
+                            ...lineOpts
+                        })
+                    );
+                }
+                const underlineCount = 3;
+                for (let i = 0; i < underlineCount; i++) {
+                    allChildren.push(
+                        new docx.Paragraph({
+                            children: [new docx.TextRun({ text: '__________', size: 20 })],
+                            spacing: { after: 100 }
+                        })
+                    );
+                }
+            });
+        }
+
         // 創建單一 section，包含所有內容（標題、表格、題目、EX）
         const doc = new docx.Document({
             sections: [{
@@ -1329,7 +1483,7 @@ class WordGenerator {
     }
 
     // 生成答案卷（教師用）
-    async generateAnswerSheet(examName, questions, exSelectedAll = []) {
+    async generateAnswerSheet(examName, questions, exSelectedAll = [], wordNonMcSelected = []) {
         // 所有內容將添加到同一個 section，確保連續流動
         const allChildren = [];
         
@@ -1711,6 +1865,51 @@ class WordGenerator {
             });
         }
 
+        // Word 非選擇題區塊（僅 Managerial，放在 EX 之後）
+        if (currentSubject === 'managerial' && wordNonMcSelected && wordNonMcSelected.length > 0) {
+            answerChildren.push(
+                new docx.Paragraph({
+                    children: [
+                        new docx.TextRun({
+                            text: 'II. NON-MULTIPLE-CHOICE (Word) - Answers',
+                            bold: true,
+                            size: 22
+                        })
+                    ],
+                    spacing: { before: 400, after: 200 }
+                })
+            );
+            wordNonMcSelected.forEach((w, idx) => {
+                if (idx > 0) {
+                    answerChildren.push(new docx.Paragraph({ children: [], spacing: { before: 300, after: 0 } }));
+                }
+                answerChildren.push(
+                    new docx.Paragraph({
+                        children: [new docx.TextRun({ text: w.originalId + '.', bold: true, size: 22 })],
+                        spacing: { after: 100 }
+                    })
+                );
+                const qLines = w.questionLines || [];
+                if (qLines.length > 0) {
+                    const qText = qLines.map(l => (l == null ? '' : String(l))).join('\n');
+                    answerChildren.push(...makeParagraphsFromLines(qText, { spacing: { after: 80 } }));
+                }
+                if (w.hasAnswerSection && (w.answerLines || []).length > 0) {
+                    answerChildren.push(
+                        new docx.Paragraph({
+                            children: [new docx.TextRun({ text: 'ANSWER:', bold: true, size: 20 })],
+                            spacing: { after: 50 }
+                        })
+                    );
+                    const aText = w.answerLines.map(l => (l == null ? '' : String(l))).join('\n');
+                    answerChildren.push(...makeParagraphsFromLines(aText, { spacing: { after: 80 }, indent: { left: 400 } }));
+                }
+                answerChildren.push(
+                    new docx.Paragraph({ children: [], spacing: { after: 200 } })
+                );
+            });
+        }
+
         // 將摘要表格和詳細題目都添加到同一個陣列
         allChildren.push(...answerChildren);
         
@@ -1750,6 +1949,15 @@ const parsedQuestionsDiv = document.getElementById('parsedQuestions');
 const generateSection = document.getElementById('generateSection');
 const generateBtn = document.getElementById('generateBtn');
 const generateStatus = document.getElementById('generateStatus');
+const wordUploadSection = document.getElementById('wordUploadSection');
+const wordUploadArea = document.getElementById('wordUploadArea');
+const wordInput = document.getElementById('wordInput');
+const wordParseStatus = document.getElementById('wordParseStatus');
+const wordConfig = document.getElementById('wordConfig');
+const wordFileNameSpan = document.getElementById('wordFileNameSpan');
+const wordAvailableSpan = document.getElementById('wordAvailableSpan');
+const wordRequestedInput = document.getElementById('wordRequestedInput');
+const wordClearBtn = document.getElementById('wordClearBtn');
 
 // Points Rows 資料結構（羅馬數字 I-X）
 let pointsRows = [
@@ -1933,6 +2141,7 @@ function applySubjectUI(prevSubject) {
         if (examNameBuilder) {
             examNameBuilder.style.display = 'block';
         }
+        if (wordUploadSection) wordUploadSection.style.display = 'block';
         
         // 設定預設值（如果剛切換到 managerial）
         if (prevSubject !== 'managerial') {
@@ -1949,10 +2158,11 @@ function applySubjectUI(prevSubject) {
         // 更新 Exam Name
         examNameInput.value = buildManagerialExamName();
     } else {
-        // Financial Accounting：隱藏 Builder
+        // Financial Accounting：隱藏 Builder 與 Word 上傳區
         if (examNameBuilder) {
             examNameBuilder.style.display = 'none';
         }
+        if (wordUploadSection) wordUploadSection.style.display = 'none';
         
         // Financial Accounting 的既有邏輯
         const currentVal = (examNameInput.value || '').trim();
@@ -2048,6 +2258,39 @@ pdfInput.addEventListener('change', (e) => {
     const files = Array.from(e.target.files);
     addFiles(files);
 });
+
+// Word 上傳區（僅 Managerial 顯示）
+if (wordUploadArea) wordUploadArea.addEventListener('click', () => { if (wordInput) wordInput.click(); });
+if (wordInput) {
+    wordInput.addEventListener('change', (e) => {
+        const f = e.target.files && e.target.files[0];
+        if (f) parseWordFile(f);
+    });
+}
+if (wordClearBtn) {
+    wordClearBtn.addEventListener('click', () => {
+        wordFile = null;
+        wordNonMcQuestions = [];
+        wordParseState = 'idle';
+        if (wordInput) wordInput.value = '';
+        if (wordRequestedInput) wordRequestedInput.value = '0';
+        updateWordParseUI();
+    });
+}
+function clampWordRequested() {
+    if (!wordRequestedInput || !wordAvailableSpan) return;
+    const max = parseInt(wordAvailableSpan.textContent, 10) || 0;
+    let v = parseInt(wordRequestedInput.value, 10);
+    if (isNaN(v)) v = 0;
+    if (v < 0) v = 0;
+    if (v > max) v = max;
+    wordRequestedInput.value = String(v);
+    wordRequestedInput.max = max;
+}
+if (wordRequestedInput) {
+    wordRequestedInput.addEventListener('input', clampWordRequested);
+    wordRequestedInput.addEventListener('change', clampWordRequested);
+}
 
 // 添加檔案
 function addFiles(files) {
@@ -2339,6 +2582,20 @@ generateBtn.addEventListener('click', async () => {
         totalSelected += requestedCount;
     }
 
+    // Word 非選擇題驗證（僅 Managerial，且已上傳 Word 時）
+    if (!hasError && currentSubject === 'managerial' && wordParseState === 'parsed' && wordNonMcQuestions.length > 0) {
+        clampWordRequested();
+        const wReq = parseInt(wordRequestedInput && wordRequestedInput.value ? wordRequestedInput.value : 0, 10) || 0;
+        const wAvail = wordNonMcQuestions.length;
+        if (wReq < 0) {
+            hasError = true;
+            errorMessage = 'Word 要抽題數不能為負數';
+        } else if (wReq > wAvail) {
+            hasError = true;
+            errorMessage = `Word 請求 ${wReq} 題，但只有 ${wAvail} 題可用`;
+        }
+    }
+
     if (hasError) {
         generateStatus.innerHTML = `<div class="status error">${errorMessage}</div>`;
         return;
@@ -2400,6 +2657,15 @@ generateBtn.addEventListener('click', async () => {
             }
         }
 
+        // Word 非選擇題抽題（僅 Managerial，且已上傳 Word 時；同一次 Generate 用同一組）
+        let wordNonMcSelected = [];
+        if (currentSubject === 'managerial' && wordParseState === 'parsed' && wordNonMcQuestions.length > 0 && wordRequestedInput) {
+            const wReq = parseInt(wordRequestedInput.value, 10) || 0;
+            if (wReq > 0) {
+                wordNonMcSelected = generator.randomSelect(wordNonMcQuestions, wReq);
+            }
+        }
+
         // 讀取 Exam Points（僅 Managerial Accounting 需要）
         const examPoints = (currentSubject === 'managerial') ? readExamPointsFromUI() : null;
         
@@ -2407,11 +2673,11 @@ generateBtn.addEventListener('click', async () => {
         const wordGen = new WordGenerator();
         
         console.log('Generating Questions doc...');
-        const questionBlob = await wordGen.generateQuestionSheet(examName, examQuestions, examPoints, exSelectedAll);
+        const questionBlob = await wordGen.generateQuestionSheet(examName, examQuestions, examPoints, exSelectedAll, wordNonMcSelected);
         console.log('Questions doc generated');
         
         console.log('Generating Answers doc...');
-        const answerBlob = await wordGen.generateAnswerSheet(examName, examQuestions, exSelectedAll);
+        const answerBlob = await wordGen.generateAnswerSheet(examName, examQuestions, exSelectedAll, wordNonMcSelected);
         console.log('Answers doc generated');
         
         // 下載兩個檔案（分別下載，確保不會覆蓋）

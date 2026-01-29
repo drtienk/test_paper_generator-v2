@@ -28,6 +28,27 @@
             <div id="fileList" class="file-list"></div>
         </section>
 
+        <!-- Word 非選擇題上傳（僅 Managerial 顯示） -->
+        <section class="step" id="wordUploadSection">
+            <h2>Upload WORD for Non-MC (.docx)</h2>
+            <div class="upload-area" id="wordUploadArea" style="padding: 24px;">
+                <p>點擊或拖放 .docx 檔案（非選擇題題庫）</p>
+                <input type="file" id="wordInput" accept=".docx" style="display: none;">
+            </div>
+            <div id="wordParseStatus" class="word-parse-status" style="margin-top: 12px; font-size: 14px; color: #555;"></div>
+            <div id="wordConfig" style="margin-top: 12px; display: none;">
+                <div style="margin-bottom: 8px;">
+                    <span>檔名：</span><span id="wordFileNameSpan"></span>
+                    <span style="margin-left: 12px;">可用非選擇題：</span><span id="wordAvailableSpan">0</span> 題
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <label for="wordRequestedInput">要抽幾題：</label>
+                    <input type="number" id="wordRequestedInput" min="0" value="0" step="1" style="width: 70px; padding: 5px; border: 2px solid #ddd; border-radius: 4px; text-align: center;">
+                    <button type="button" id="wordClearBtn" style="padding: 4px 10px; font-size: 13px;">清除</button>
+                </div>
+            </div>
+        </section>
+
         <!-- 設定出題規則 -->
         <section class="step">
             <h2>步驟 2：設定出題規則</h2>
@@ -95,6 +116,7 @@
     </script>
     <script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js"></script>
     <script src="app.js"></script>
 </body>
 </html>
