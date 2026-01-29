@@ -1093,6 +1093,109 @@ class WordGenerator {
                 })
             );
 
+            // EX 題目清理 Helper 函數（僅用於題目卷 EX 輸出）
+            const sanitizeLine = (line) => {
+                if (!line) return '';
+                let cleaned = String(line);
+                // normalize spaces（保留必要縮排，只 trimEnd）
+                cleaned = cleaned.replace(/\s+$/g, '');
+                // 移除 "(Algorithmic)"（大小寫不敏感）
+                cleaned = cleaned.replace(/\(Algorithmic\)/gi, '');
+                // 移除 check marks ✔/✓
+                cleaned = cleaned.replace(/[✔✓]/g, '');
+                return cleaned;
+            };
+
+            const isUnderlineLine = (line) => {
+                if (!line) return false;
+                return /^\s*_+\s*$/.test(String(line));
+            };
+
+            const stripAnswerBlocksFromRequiredLines = (requiredLines, originalLinesForCheck) => {
+                const outputLines = [];
+                const originalLines = originalLinesForCheck || [];
+                
+                // 答案區塊判斷函數
+                const isDollarLine = (line) => /^\s*\$\s*(.*)?$/.test(line);
+                const isPureNumber = (line) => /^\s*[-(]?\s*[\d,]+(\.\d+)?\s*\)?\s*$/.test(line);
+                const isUnitLine = (line) => /^\s*(per unit|%|units?|DLH|hours?)\s*$/i.test(line);
+                const isAnswerLabel = (line) => /^\s*(Direct labor|Direct materials|Answer|Solution|Feedback|Post-Submission)\s*$/i.test(line);
+                const hasCheckOriginal = (idx) => {
+                    if (idx < 0 || idx >= originalLines.length) return false;
+                    return /[✔✓]/.test(String(originalLines[idx]));
+                };
+
+                let i = 0;
+                while (i < requiredLines.length) {
+                    const line = String(requiredLines[i] || '').trim();
+                    const cleanLine = sanitizeLine(line);
+                    
+                    // 1. 先檢查是否為底線行，直接跳過（不輸出）
+                    if (isUnderlineLine(line)) {
+                        i++;
+                        continue;
+                    }
+
+                    // 2. 檢查是否進入答案區塊
+                    let isAnswerBlock = false;
+                    
+                    // 觸發條件 a: isDollarLine
+                    if (isDollarLine(cleanLine)) {
+                        isAnswerBlock = true;
+                    }
+                    // 觸發條件 b: hasCheckOriginal
+                    else if (hasCheckOriginal(i)) {
+                        isAnswerBlock = true;
+                    }
+                    // 觸發條件 c: isAnswerLabel 且接下來 1~3 行內出現答案特徵
+                    else if (isAnswerLabel(cleanLine)) {
+                        for (let lookahead = 1; lookahead <= 3 && (i + lookahead) < requiredLines.length; lookahead++) {
+                            const nextLine = String(requiredLines[i + lookahead] || '').trim();
+                            const nextCleanLine = sanitizeLine(nextLine);
+                            if (isDollarLine(nextCleanLine) || isPureNumber(nextCleanLine) || hasCheckOriginal(i + lookahead)) {
+                                isAnswerBlock = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    // 3. 如果進入答案區塊，連續吃掉答案行直到遇到題目文字
+                    if (isAnswerBlock) {
+                        while (i < requiredLines.length) {
+                            const currentLine = String(requiredLines[i] || '').trim();
+                            const currentCleanLine = sanitizeLine(currentLine);
+                            
+                            // 繼續吃答案行的條件
+                            if (isDollarLine(currentCleanLine) ||
+                                hasCheckOriginal(i) ||
+                                isPureNumber(currentCleanLine) ||
+                                isUnitLine(currentCleanLine) ||
+                                isAnswerLabel(currentCleanLine) ||
+                                isUnderlineLine(currentLine) ||
+                                currentLine === '') {
+                                i++;
+                                continue;
+                            }
+                            
+                            // 遇到題目文字，結束答案區塊
+                            break;
+                        }
+                        continue;
+                    }
+
+                    // 4. 非答案區塊的行，輸出（但先清理）
+                    if (cleanLine) {
+                        outputLines.push(cleanLine);
+                    } else if (line === '') {
+                        // 保留空白行（但不在答案區塊中）
+                        outputLines.push('');
+                    }
+                    i++;
+                }
+
+                return outputLines;
+            };
+
             // 輸出每個 EX 題目
             exSelectedAll.forEach((ex, index) => {
                 // 題號（延續 MC 題號）
@@ -1113,12 +1216,12 @@ class WordGenerator {
                     return s.trim();
                 };
 
-                const promptText = cleanExText(ex.promptText);
-                const requiredText = cleanExText(ex.requiredText);
-
+                // 處理 promptText：移除 "(Algorithmic)" 並逐行清理
+                let promptText = ex.promptText || '';
                 const promptLines = promptText ? promptText.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n') : [];
-                const firstPromptLine = promptLines.length > 0 ? promptLines[0] : '';
-                const remainingPromptText = promptLines.length > 1 ? promptLines.slice(1).join('\n') : '';
+                const cleanedPromptLines = promptLines.map(line => sanitizeLine(line));
+                const firstPromptLine = cleanedPromptLines.length > 0 ? cleanedPromptLines[0] : '';
+                const remainingPromptLines = cleanedPromptLines.length > 1 ? cleanedPromptLines.slice(1) : [];
 
                 // 先印出 EX 題號（用自己的連續題號；不印原始 EX 編號）
                 allChildren.push(
@@ -1133,35 +1236,63 @@ class WordGenerator {
                     })
                 );
 
-                // prompt/stem（續行逐行輸出）
-                if (remainingPromptText) {
-                    allChildren.push(...toParagraphsByLine(remainingPromptText, {
-                        spacing: { after: 80 },
-                        indent: { left: 400 }
-                    }));
+                // prompt/stem（續行逐行輸出，已清理 "(Algorithmic)"）
+                if (remainingPromptLines.length > 0) {
+                    remainingPromptLines.forEach(line => {
+                        if (line === '') {
+                            allChildren.push(new docx.Paragraph({ children: [], spacing: { after: 80 }, indent: { left: 400 } }));
+                        } else {
+                            allChildren.push(
+                                new docx.Paragraph({
+                                    children: [new docx.TextRun({ text: line, size: 20 })],
+                                    spacing: { after: 80 },
+                                    indent: { left: 400 }
+                                })
+                            );
+                        }
+                    });
                 }
 
                 // Required:（單獨一行）
-                if (requiredText) {
-                    allChildren.push(
-                        new docx.Paragraph({
-                            children: [
-                                new docx.TextRun({
-                                    text: 'Required:',
-                                    bold: true,
-                                    size: 20
-                                })
-                            ],
-                            spacing: { after: 50 },
-                            indent: { left: 400 }
-                        })
-                    );
+                if (ex.requiredText) {
+                    // 準備原始行（用於檢查 ✔）
+                    const originalRequiredLines = (ex.requiredText || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+                    const requiredLines = (ex.requiredText || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+                    
+                    // 使用 stripAnswerBlocksFromRequiredLines 清理 Required 區塊
+                    const cleanedRequiredLines = stripAnswerBlocksFromRequiredLines(requiredLines, originalRequiredLines);
 
-                    // requiredText（逐行輸出）
-                    allChildren.push(...toParagraphsByLine(requiredText, {
-                        spacing: { after: 80 },
-                        indent: { left: 400 }
-                    }));
+                    // 只輸出清理後的行（過濾掉空行，除非是必要的段落分隔）
+                    if (cleanedRequiredLines.length > 0) {
+                        allChildren.push(
+                            new docx.Paragraph({
+                                children: [
+                                    new docx.TextRun({
+                                        text: 'Required:',
+                                        bold: true,
+                                        size: 20
+                                    })
+                                ],
+                                spacing: { after: 50 },
+                                indent: { left: 400 }
+                            })
+                        );
+
+                        // requiredText（逐行輸出，已清理答案和底線）
+                        cleanedRequiredLines.forEach(line => {
+                            if (line === '') {
+                                allChildren.push(new docx.Paragraph({ children: [], spacing: { after: 80 }, indent: { left: 400 } }));
+                            } else {
+                                allChildren.push(
+                                    new docx.Paragraph({
+                                        children: [new docx.TextRun({ text: line, size: 20 })],
+                                        spacing: { after: 80 },
+                                        indent: { left: 400 }
+                                    })
+                                );
+                            }
+                        });
+                    }
                 }
                 
                 // 作答區：用底線取代答案位置
