@@ -335,13 +335,13 @@ class PDFParser {
     extractExerciseQuestionsFromText(text) {
         const exQuestions = [];
 
-        // EX header：EX.03.37、EX.04.40.ALGO、EX.04.40.SOMETHING...
-        // 允許前面有題號「12. 」等；並允許 EX 與數字之間有空白或換行
-        const exHeaderPattern = /\b(\d+\.\s*)?(EX\.\d+\.\d+(?:\.[A-Z0-9]+)*)\b/gi;
+        // EX/PR header：EX.03.37、PR.04.12.ALGO 等（非選擇題）
+        // 允許前面有題號「12. 」等；並允許 EX/PR 與數字之間有空白或換行
+        const exHeaderPattern = /\b(\d+\.\s*)?((?:EX|PR)\.\d+\.\d+(?:\.[A-Z0-9]+)*)\b/gi;
 
-        // 邊界：下一個 MC 或 EX header（用來切分區塊）
+        // 邊界：下一個 MC 或 EX/PR header（用來切分區塊）
         // 注意：MC 的 suffix 只允許 .ALGO（沿用既有規則）
-        const boundaryPattern = /\b(\d+\.\s*)?((?:MC\.\d+\.\d+(?:\.ALGO)?)|(?:EX\.\d+\.\d+(?:\.[A-Z0-9]+)*))\b/gi;
+        const boundaryPattern = /\b(\d+\.\s*)?((?:MC\.\d+\.\d+(?:\.ALGO)?)|(?:EX|PR)\.\d+\.\d+(?:\.[A-Z0-9]+)*)\b/gi;
         const boundaries = [...text.matchAll(boundaryPattern)].map(m => ({
             index: m.index,
             id: m[2]
@@ -412,7 +412,7 @@ class PDFParser {
 
             return {
                 originalId,
-                type: 'EX',
+                type: (originalId || '').toUpperCase().startsWith('PR') ? 'PR' : 'EX',
                 promptText: promptText,
                 requiredText: requiredText,
                 answerTextOrTokens: tokens.join('\n').trim(),
