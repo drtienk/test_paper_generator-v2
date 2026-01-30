@@ -695,6 +695,53 @@ function parseWordQuestions(lines) {
     return questions;
 }
 
+/** 數字轉羅馬數字（2->II, 3->III, 4->IV ...，至少支援到 50） */
+function toRoman(n) {
+    const num = parseInt(n, 10);
+    if (isNaN(num) || num < 1 || num > 50) return String(n);
+    const map = [
+        [50, 'L'], [40, 'XL'], [10, 'X'], [9, 'IX'], [5, 'V'], [4, 'IV'], [1, 'I']
+    ];
+    let s = '';
+    let x = num;
+    for (const [val, sym] of map) {
+        while (x >= val) {
+            s += sym;
+            x -= val;
+        }
+    }
+    return s;
+}
+
+/**
+ * 將單題 <w:tbl> 內第一個題號（^\s*\d{1,4}\.\s）替換成羅馬題號（如 II. ）
+ * @param {string} tblXmlString - 單題 <w:tbl> XML 字串
+ * @param {string} romanLabel - 羅馬數字字串（如 "II", "III"）
+ * @returns {string} 替換後的 <w:tbl> XML 字串
+ */
+function replaceFirstQuestionNumberWithRoman(tblXmlString, romanLabel) {
+    if (!tblXmlString || typeof tblXmlString !== 'string' || !romanLabel) return tblXmlString;
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(tblXmlString, 'application/xml');
+    const parseErr = doc.querySelector('parsererror');
+    if (parseErr) return tblXmlString;
+    const tbl = doc.documentElement;
+    if (!tbl || (tbl.localName !== 'tbl' && tbl.nodeName !== 'w:tbl')) return tblXmlString;
+    const tNodes = tbl.getElementsByTagNameNS(W_NS, 't');
+    const re = /^\s*\d{1,4}\.\s/;
+    for (let i = 0; i < tNodes.length; i++) {
+        const t = tNodes[i];
+        const text = t.textContent || '';
+        const m = text.match(re);
+        if (m) {
+            const newText = text.replace(re, romanLabel + '. ');
+            t.textContent = newText;
+            return new XMLSerializer().serializeToString(tbl);
+        }
+    }
+    return tblXmlString;
+}
+
 // 遞迴取得元素內所有 w:t 的文字（題號在 w:tbl → w:tc → w:p → w:t 內）
 function getAllTextFromElement(elem) {
     const tNodes = elem.getElementsByTagNameNS(W_NS, 't');
@@ -1051,11 +1098,13 @@ async function injectNonMcIntoQuestionsDocx(questionsBlobFromDocxJs, selectedWor
             return questionsBlobFromDocxJs;
         }
         const pEnd = pEndSearch + '</w:p>'.length;
+        const startRoman = 2; // II = 2
         const insertXml = selectedWordQuestions
-            .map(q => {
+            .map((q, idx) => {
                 const stripped = stripAnswerFromWordTblXml(q.xmlString);
                 const withSpace = appendBlankAnswerSpaceToTblXml_NoLines(stripped, 12);
-                return withSpace;
+                const romanLabel = toRoman(startRoman + idx);
+                return replaceFirstQuestionNumberWithRoman(withSpace, romanLabel);
             })
             .join('\n');
         documentXml = documentXml.substring(0, pStartSearch) + insertXml + documentXml.substring(pEnd);
@@ -1090,9 +1139,12 @@ async function injectNonMcIntoAnswersDocx(answersBlobFromDocxJs, selectedWordQue
             return answersBlobFromDocxJs;
         }
         const pEnd = pEndSearch + '</w:p>'.length;
-        const insertXml = selectedWordQuestions.map(q => {
+        const startRoman = 2; // II = 2
+        const insertXml = selectedWordQuestions.map((q, idx) => {
             const srcP = buildSourceParagraphXml(q.sourceFileName || q.sourceDocName || 'Unknown');
-            return srcP + '\n' + q.xmlString;
+            const romanLabel = toRoman(startRoman + idx);
+            const finalXml = replaceFirstQuestionNumberWithRoman(q.xmlString, romanLabel);
+            return srcP + '\n' + finalXml;
         }).join('\n');
         documentXml = documentXml.substring(0, pStartSearch) + insertXml + documentXml.substring(pEnd);
         answersZip.file('word/document.xml', documentXml);
@@ -1796,20 +1848,8 @@ class WordGenerator {
             });
         }
 
-        // Word 非選擇題區塊（僅 Managerial）：標題 + marker，實際內容由 injectNonMcIntoQuestionsDocx 以 OOXML 注入
+        // Word 非選擇題區塊（僅 Managerial）：不輸出標題，只保留 marker 段落供 inject 插入
         if (currentSubject === 'managerial' && wordNonMcSelected && wordNonMcSelected.length > 0) {
-            allChildren.push(
-                new docx.Paragraph({
-                    children: [
-                        new docx.TextRun({
-                            text: 'II. NON-MULTIPLE-CHOICE',
-                            bold: true,
-                            size: 22
-                        })
-                    ],
-                    spacing: { before: 400, after: 200 }
-                })
-            );
             allChildren.push(
                 new docx.Paragraph({
                     children: [
@@ -2217,20 +2257,8 @@ class WordGenerator {
             });
         }
 
-        // Word 非選擇題區塊（僅 Managerial，放在 EX 之後）：標題 + marker，實際內容由 injectNonMcIntoAnswersDocx 以 OOXML 注入
+        // Word 非選擇題區塊（僅 Managerial，放在 EX 之後）：不輸出標題，只保留 marker 段落供 inject 插入
         if (currentSubject === 'managerial' && wordNonMcSelected && wordNonMcSelected.length > 0) {
-            answerChildren.push(
-                new docx.Paragraph({
-                    children: [
-                        new docx.TextRun({
-                            text: 'II. NON-MULTIPLE-CHOICE (ANSWERS)',
-                            bold: true,
-                            size: 22
-                        })
-                    ],
-                    spacing: { before: 400, after: 200 }
-                })
-            );
             answerChildren.push(
                 new docx.Paragraph({
                     children: [
