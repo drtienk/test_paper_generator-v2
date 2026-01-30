@@ -698,6 +698,55 @@ function getAllTextFromElement(elem) {
     return text;
 }
 
+/**
+ * 從單題 w:tbl XML 字串中移除 ANSWER: 之後的內容（含該 row 及之後所有 w:tr）。
+ * 用於題目卷：表格、圖片、計算式等若在 ANSWER: 所在 row 及之後，都會一併移除。
+ * @param {string} xmlString - 單題外層 <w:tbl> 的 XML 字串
+ * @returns {string} 移除 ANSWER: 區塊後的 <w:tbl> XML，找不到 ANSWER: 則回傳原字串
+ */
+function stripAnswerFromWordTblXml(xmlString) {
+    if (!xmlString || typeof xmlString !== 'string') return xmlString;
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(xmlString, 'application/xml');
+    const parseErr = doc.querySelector('parsererror');
+    if (parseErr) return xmlString;
+    const tbl = doc.documentElement;
+    if (!tbl || (tbl.localName !== 'tbl' && tbl.nodeName !== 'w:tbl')) return xmlString;
+    const tNodes = tbl.getElementsByTagNameNS(W_NS, 't');
+    let answerTNode = null;
+    for (let i = 0; i < tNodes.length; i++) {
+        const text = (tNodes[i].textContent || '');
+        if (text.indexOf('ANSWER:') !== -1) {
+            answerTNode = tNodes[i];
+            break;
+        }
+    }
+    if (!answerTNode) return xmlString;
+    let el = answerTNode;
+    while (el && el !== tbl) {
+        if (el.namespaceURI === W_NS && el.localName === 'tr') break;
+        el = el.parentElement;
+    }
+    const answerRow = (el && el !== tbl) ? el : null;
+    if (!answerRow) return xmlString;
+    const rows = tbl.getElementsByTagNameNS(W_NS, 'tr');
+    let startIndex = -1;
+    for (let i = 0; i < rows.length; i++) {
+        if (rows[i] === answerRow) {
+            startIndex = i;
+            break;
+        }
+    }
+    if (startIndex === -1) return xmlString;
+    const toRemove = [];
+    for (let j = startIndex; j < rows.length; j++) toRemove.push(rows[j]);
+    for (let k = 0; k < toRemove.length; k++) {
+        const row = toRemove[k];
+        if (row.parentNode) row.parentNode.removeChild(row);
+    }
+    return new XMLSerializer().serializeToString(tbl);
+}
+
 // OOXML 層級題目切分：每題 = <w:body> 的一個直接子節點 <w:tbl>
 function segmentQuestionsFromXml(documentXml) {
     const parser = new DOMParser();
@@ -846,7 +895,9 @@ async function injectNonMcIntoQuestionsDocx(questionsBlobFromDocxJs, selectedWor
             return questionsBlobFromDocxJs;
         }
         const pEnd = pEndSearch + '</w:p>'.length;
-        const insertXml = selectedWordQuestions.map(q => q.xmlString).join('\n');
+        const insertXml = selectedWordQuestions
+            .map(q => stripAnswerFromWordTblXml(q.xmlString))
+            .join('\n');
         documentXml = documentXml.substring(0, pStartSearch) + insertXml + documentXml.substring(pEnd);
         questionsZip.file('word/document.xml', documentXml);
         const newBlob = await questionsZip.generateAsync({
