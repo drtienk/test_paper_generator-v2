@@ -47,6 +47,10 @@ let wordQuestionSegments = [];     // 向後相容：與 wordAllQuestionSegments
 let wordParseState = 'idle';       // 'idle' | 'parsing' | 'parsed' | 'error'
 const W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 
+function escapeHtml(str) {
+    return (str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 // ========== PDF 解析器類別 ==========
 class PDFParser {
     static FINANCIAL_SYMBOLS = {
@@ -902,7 +906,8 @@ async function parseWordFiles(files) {
                 zip,
                 stylesXml,
                 numberingXml,
-                segments: segmentsWithSource
+                segments: segmentsWithSource,
+                requestedCount: 0
             });
             wordAllQuestionSegments.push(...segmentsWithSource);
         }
@@ -974,20 +979,39 @@ function updateWordParseUI() {
     const rangeText = n > 0 ? '（題號 ' + wordAllQuestionSegments[0].id + '–' + wordAllQuestionSegments[n - 1].id + '）' : '';
     if (wordAvailableSpan) wordAvailableSpan.textContent = n + ' 題' + rangeText;
     const wordFileListEl = document.getElementById('wordFileList');
+    const wordSumRequestedSpan = document.getElementById('wordSumRequestedSpan');
+    const wordSumRequestedRow = document.getElementById('wordSumRequestedRow');
+    const wordSingleRequestedRow = document.getElementById('wordSingleRequestedRow');
     if (wordFileListEl && wordDocs.length > 0) {
         wordFileListEl.innerHTML = wordDocs.map((doc, idx) => {
-            const segs = doc.segments;
+            const segs = doc.segments || [];
             const count = segs.length;
             const range = count > 0 ? (segs[0].id + '–' + segs[count - 1].id) : '–';
-            return `<div>${doc.fileName}：${count} 題（題號 ${range}）</div>`;
+            const req = Math.min(Math.max(0, doc.requestedCount || 0), count);
+            if (doc.requestedCount !== req) doc.requestedCount = req;
+            return `<div class="word-per-file-row" style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                <span style="min-width: 120px;">${escapeHtml(doc.fileName)}</span>
+                <span>可用 ${count} 題（題號 ${range}）</span>
+                <label>抽題數：</label>
+                <input type="number" class="word-per-file-requested" data-doc-index="${idx}" min="0" max="${count}" value="${req}" step="1" style="width: 60px; padding: 4px; text-align: center;">
+            </div>`;
         }).join('');
         wordFileListEl.style.display = 'block';
-    } else if (wordFileListEl) {
-        wordFileListEl.innerHTML = '';
-        wordFileListEl.style.display = 'none';
+        let sumRequested = wordDocs.reduce((s, d) => s + (d.requestedCount || 0), 0);
+        if (wordSumRequestedSpan) wordSumRequestedSpan.textContent = String(sumRequested);
+        if (wordSumRequestedRow) wordSumRequestedRow.style.display = 'block';
+        if (wordSingleRequestedRow) wordSingleRequestedRow.style.display = 'none';
+    } else {
+        if (wordFileListEl) {
+            wordFileListEl.innerHTML = '';
+            wordFileListEl.style.display = 'none';
+        }
+        if (wordSumRequestedSpan) wordSumRequestedSpan.textContent = '0';
+        if (wordSumRequestedRow) wordSumRequestedRow.style.display = 'none';
+        if (wordSingleRequestedRow) wordSingleRequestedRow.style.display = 'flex';
     }
     if (wordConfig) wordConfig.style.display = 'block';
-    if (wordRequestedInput) {
+    if (wordRequestedInput && wordDocs.length === 0) {
         wordRequestedInput.max = n;
         let v = parseInt(wordRequestedInput.value, 10);
         if (isNaN(v) || v < 0) v = 0;
@@ -998,6 +1022,17 @@ function updateWordParseUI() {
 
 const NONMC_INSERT_MARKER = '##__NONMC_INSERT_POINT__##';
 const NONMC_ANSWER_INSERT_MARKER = '##__NONMC_ANSWER_INSERT_POINT__##';
+
+/**
+ * 建立 OOXML <w:p> 段落，內容為 "Non-MC Source: fileName"（用於 Answers.docx 每題前顯示來源檔名）
+ * @param {string} fileName - 來源 Word 檔名
+ * @returns {string} 合法的 <w:p> XML 字串
+ */
+function buildSourceParagraphXml(fileName) {
+    const raw = (fileName || 'Unknown').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+    const text = 'Non-MC Source: ' + raw;
+    return '<w:p xmlns:w="' + W_NS + '"><w:r><w:t>' + text + '</w:t></w:r></w:p>';
+}
 
 async function injectNonMcIntoQuestionsDocx(questionsBlobFromDocxJs, selectedWordQuestions, originalWordZip) {
     try {
@@ -1055,7 +1090,10 @@ async function injectNonMcIntoAnswersDocx(answersBlobFromDocxJs, selectedWordQue
             return answersBlobFromDocxJs;
         }
         const pEnd = pEndSearch + '</w:p>'.length;
-        const insertXml = selectedWordQuestions.map(q => q.xmlString).join('\n');
+        const insertXml = selectedWordQuestions.map(q => {
+            const srcP = buildSourceParagraphXml(q.sourceFileName || q.sourceDocName || 'Unknown');
+            return srcP + '\n' + q.xmlString;
+        }).join('\n');
         documentXml = documentXml.substring(0, pStartSearch) + insertXml + documentXml.substring(pEnd);
         answersZip.file('word/document.xml', documentXml);
         const newBlob = await answersZip.generateAsync({
@@ -2635,6 +2673,39 @@ if (wordRequestedInput) {
     wordRequestedInput.addEventListener('change', clampWordRequested);
 }
 
+function clampWordPerFileRequested(inputEl) {
+    if (!inputEl || !inputEl.dataset.docIndex) return;
+    const idx = parseInt(inputEl.dataset.docIndex, 10);
+    if (isNaN(idx) || idx < 0 || idx >= wordDocs.length) return;
+    const doc = wordDocs[idx];
+    const max = (doc.segments && doc.segments.length) || 0;
+    let v = parseInt(inputEl.value, 10);
+    if (isNaN(v)) v = 0;
+    if (v < 0) v = 0;
+    if (v > max) v = max;
+    inputEl.value = String(v);
+    inputEl.max = max;
+    doc.requestedCount = v;
+    const wordSumRequestedSpan = document.getElementById('wordSumRequestedSpan');
+    if (wordSumRequestedSpan) {
+        const sumRequested = wordDocs.reduce((s, d) => s + (d.requestedCount || 0), 0);
+        wordSumRequestedSpan.textContent = String(sumRequested);
+    }
+}
+
+if (wordConfig) {
+    wordConfig.addEventListener('input', (e) => {
+        if (e.target && e.target.classList && e.target.classList.contains('word-per-file-requested')) {
+            clampWordPerFileRequested(e.target);
+        }
+    });
+    wordConfig.addEventListener('change', (e) => {
+        if (e.target && e.target.classList && e.target.classList.contains('word-per-file-requested')) {
+            clampWordPerFileRequested(e.target);
+        }
+    });
+}
+
 // 添加檔案
 function addFiles(files) {
     console.log('PDF upload handler fired');
@@ -2925,17 +2996,12 @@ generateBtn.addEventListener('click', async () => {
         totalSelected += requestedCount;
     }
 
-    // Word 非選擇題驗證（僅 Managerial，且已上傳 Word 時）
-    if (!hasError && currentSubject === 'managerial' && wordParseState === 'parsed' && wordAllQuestionSegments.length > 0) {
-        clampWordRequested();
-        const wReq = parseInt(wordRequestedInput && wordRequestedInput.value ? wordRequestedInput.value : 0, 10) || 0;
-        const wAvail = wordAllQuestionSegments.length;
-        if (wReq < 0) {
+    // Word 非選擇題驗證（僅 Managerial，且已上傳 Word 時）：總抽題數 = 每檔 requestedCount 加總
+    if (!hasError && currentSubject === 'managerial' && wordParseState === 'parsed' && wordDocs.length > 0) {
+        const sumRequested = wordDocs.reduce((s, d) => s + (d.requestedCount || 0), 0);
+        if (sumRequested < 0) {
             hasError = true;
             errorMessage = 'Word 要抽題數不能為負數';
-        } else if (wReq > wAvail) {
-            hasError = true;
-            errorMessage = `Word 請求 ${wReq} 題，但只有 ${wAvail} 題可用`;
         }
     }
 
@@ -2944,8 +3010,10 @@ generateBtn.addEventListener('click', async () => {
         return;
     }
 
-    if (totalSelected === 0) {
-        generateStatus.innerHTML = '<div class="status error">請至少為一個檔案設定大於 0 的題目數</div>';
+    const wordSumRequested = wordDocs.length > 0 ? wordDocs.reduce((s, d) => s + (d.requestedCount || 0), 0) : 0;
+    const hasWordOnly = currentSubject === 'managerial' && wordDocs.length > 0 && wordSumRequested > 0;
+    if (totalSelected === 0 && !hasWordOnly) {
+        generateStatus.innerHTML = '<div class="status error">請至少為一個檔案設定大於 0 的題目數（PDF 或 Word Non-MC）</div>';
         return;
     }
 
@@ -3000,12 +3068,20 @@ generateBtn.addEventListener('click', async () => {
             }
         }
 
-        // Word 非選擇題抽題（僅 Managerial）：從 wordAllQuestionSegments 隨機抽，選中為 OOXML segment 陣列
+        // Word 非選擇題抽題（僅 Managerial）：每檔各自抽 requestedCount，合併後再 shuffle
         let wordNonMcSelected = [];
-        if (currentSubject === 'managerial' && wordParseState === 'parsed' && wordAllQuestionSegments.length > 0 && wordRequestedInput) {
-            const wReq = parseInt(wordRequestedInput.value, 10) || 0;
-            if (wReq > 0) {
-                wordNonMcSelected = generator.randomSelect(wordAllQuestionSegments, wReq);
+        if (currentSubject === 'managerial' && wordParseState === 'parsed' && wordDocs.length > 0) {
+            const wordNonMcSelectedByDoc = [];
+            for (let i = 0; i < wordDocs.length; i++) {
+                const req = wordDocs[i].requestedCount || 0;
+                const avail = wordDocs[i].segments || [];
+                if (req > 0 && avail.length > 0) {
+                    const selected = generator.randomSelect(avail, req);
+                    wordNonMcSelectedByDoc.push(...selected);
+                }
+            }
+            if (wordNonMcSelectedByDoc.length > 0) {
+                wordNonMcSelected = generator.shuffle(wordNonMcSelectedByDoc);
             }
         }
 
