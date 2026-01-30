@@ -41,7 +41,7 @@
             <div id="wordConfig" style="margin-top: 12px; display: none;">
                 <div style="margin-bottom: 8px;">
                     <span>檔名：</span><span id="wordFileNameSpan"></span>
-                    <span style="margin-left: 12px;">可用非選擇題：</span><span id="wordAvailableSpan">0</span> 題
+                    <span style="margin-left: 12px;">可用非選擇題：</span><span id="wordAvailableSpan">0 題</span>
                 </div>
                 <div style="display: flex; align-items: center; gap: 8px;">
                     <label for="wordRequestedInput">要抽幾題：</label>
@@ -116,6 +116,7 @@
         // 設定 pdf.js worker
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
     </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js"></script>

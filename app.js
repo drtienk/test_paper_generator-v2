@@ -34,10 +34,15 @@ let exRequestedCountsByFileIndex = []; // 使用者對每檔案設定的 EX 題�
 let parser = null;
 let generator = null;
 
-// Word 非選擇題題庫（僅 Managerial）
+// Word 非選擇題題庫（僅 Managerial）- OOXML 版：每題 = 一個外層 w:tbl
 let wordFile = null;
-let wordNonMcQuestions = [];
-let wordParseState = 'idle'; // 'idle' | 'parsing' | 'parsed' | 'error'
+let wordNonMcQuestions = [];       // 向後相容 UI 顯示（由 wordQuestionSegments 映射）
+let wordDocxZip = null;            // 原始 docx ZIP（用於 inject 時可選複製 styles）
+let wordDocxStylesXml = null;
+let wordDocxNumberingXml = null;
+let wordQuestionSegments = [];     // [{ id, idNum, xmlString, previewText }, ...]
+let wordParseState = 'idle';       // 'idle' | 'parsing' | 'parsed' | 'error'
+const W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 
 // ========== PDF 解析器類別 ==========
 class PDFParser {
@@ -683,25 +688,105 @@ function parseWordQuestions(lines) {
     return questions;
 }
 
+// 遞迴取得元素內所有 w:t 的文字（題號在 w:tbl → w:tc → w:p → w:t 內）
+function getAllTextFromElement(elem) {
+    const tNodes = elem.getElementsByTagNameNS(W_NS, 't');
+    let text = '';
+    for (let i = 0; i < tNodes.length; i++) {
+        text += (tNodes[i].textContent || '');
+    }
+    return text;
+}
+
+// OOXML 層級題目切分：每題 = <w:body> 的一個直接子節點 <w:tbl>
+function segmentQuestionsFromXml(documentXml) {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(documentXml, 'application/xml');
+    const parseError = doc.querySelector('parsererror');
+    if (parseError) {
+        console.error('XML 解析錯誤:', parseError.textContent);
+        throw new Error('document.xml 解析失敗');
+    }
+    const body = doc.getElementsByTagNameNS(W_NS, 'body')[0];
+    if (!body) {
+        throw new Error('找不到 w:body');
+    }
+    const children = [];
+    for (let i = 0; i < body.childNodes.length; i++) {
+        const n = body.childNodes[i];
+        if (n.nodeType !== 1) continue;
+        children.push(n);
+    }
+    const questionStartRegex = /^\s*(\d{1,4})\.\s/;
+    const questions = [];
+    for (let idx = 0; idx < children.length; idx++) {
+        const elem = children[idx];
+        const localName = (elem.localName || elem.nodeName.replace(/^[^:]+:/, ''));
+        if (localName !== 'tbl') continue;
+        const allText = getAllTextFromElement(elem);
+        const trimmedText = allText.trimStart();
+        const match = trimmedText.match(questionStartRegex);
+        if (match) {
+            const questionId = match[1];
+            const xmlString = new XMLSerializer().serializeToString(elem);
+            questions.push({
+                id: questionId,
+                idNum: parseInt(questionId, 10),
+                xmlString: xmlString,
+                previewText: (trimmedText.substring(0, 150).replace(/\s+/g, ' ') || questionId + '.') + '...'
+            });
+        }
+    }
+    questions.sort((a, b) => a.idNum - b.idNum);
+    return questions;
+}
+
 async function parseWordFile(file) {
     if (!file || !file.name.toLowerCase().endsWith('.docx')) return;
     wordParseState = 'parsing';
     wordFile = file;
     wordNonMcQuestions = [];
+    wordQuestionSegments = [];
+    wordDocxZip = null;
+    wordDocxStylesXml = null;
+    wordDocxNumberingXml = null;
     updateWordParseUI();
     try {
         const arrayBuffer = await file.arrayBuffer();
-        const result = await mammoth.convertToHtml({ arrayBuffer });
-        const html = result.value || '';
-        const div = document.createElement('div');
-        div.innerHTML = html;
-        const paragraphs = div.querySelectorAll('p');
-        const lines = Array.from(paragraphs).map(p => (p.textContent || '').replace(/\s+$/g, ''));
-        wordNonMcQuestions = parseWordQuestions(lines);
+        const zip = await JSZip.loadAsync(arrayBuffer);
+        wordDocxZip = zip;
+        const documentXmlFile = zip.file('word/document.xml');
+        if (!documentXmlFile) {
+            throw new Error('找不到 word/document.xml');
+        }
+        const documentXml = await documentXmlFile.async('string');
+        const stylesFile = zip.file('word/styles.xml');
+        const numberingFile = zip.file('word/numbering.xml');
+        wordDocxStylesXml = stylesFile ? await stylesFile.async('string') : null;
+        wordDocxNumberingXml = numberingFile ? await numberingFile.async('string') : null;
+        wordQuestionSegments = segmentQuestionsFromXml(documentXml);
+        if (wordQuestionSegments.length === 0) {
+            throw new Error('找不到題號格式 ^\\d+\\.（請確認 Word 檔案格式）');
+        }
+        wordNonMcQuestions = wordQuestionSegments.map(q => ({
+            source: 'word',
+            originalId: q.id,
+            questionLines: [q.previewText],
+            answerLines: [],
+            hasAnswerSection: q.xmlString.includes('ANSWER:'),
+            rawLines: [],
+            _xmlSegment: q
+        }));
         wordParseState = 'parsed';
+        console.log('[Word OOXML] 解析完成，找到 ' + wordQuestionSegments.length + ' 題');
+        console.log('[Word OOXML] 題號範圍: ' + wordQuestionSegments[0].id + ' – ' + wordQuestionSegments[wordQuestionSegments.length - 1].id);
     } catch (e) {
         wordParseState = 'error';
         console.error('Word parse error:', e);
+        if (wordParseStatus) {
+            wordParseStatus.textContent = '解析失敗: ' + (e.message || String(e));
+            wordParseStatus.style.color = '#c00';
+        }
     }
     updateWordParseUI();
 }
@@ -728,15 +813,51 @@ function updateWordParseUI() {
     wordParseStatus.textContent = 'Parsed';
     wordParseStatus.style.color = '#0a0';
     if (wordFileNameSpan) wordFileNameSpan.textContent = wordFile ? wordFile.name : '';
-    if (wordAvailableSpan) wordAvailableSpan.textContent = String(wordNonMcQuestions.length);
+    const n = wordQuestionSegments.length;
+    const rangeText = n > 0 ? '（題號 ' + wordQuestionSegments[0].id + '–' + wordQuestionSegments[n - 1].id + '）' : '';
+    if (wordAvailableSpan) wordAvailableSpan.textContent = n + ' 題' + rangeText;
     if (wordConfig) wordConfig.style.display = 'block';
     if (wordRequestedInput) {
-        const n = wordNonMcQuestions.length;
         wordRequestedInput.max = n;
         let v = parseInt(wordRequestedInput.value, 10);
         if (isNaN(v) || v < 0) v = 0;
         if (v > n) v = n;
         wordRequestedInput.value = String(v);
+    }
+}
+
+const NONMC_INSERT_MARKER = '##__NONMC_INSERT_POINT__##';
+
+async function injectNonMcIntoQuestionsDocx(questionsBlobFromDocxJs, selectedWordQuestions, originalWordZip) {
+    try {
+        const arrayBuffer = await questionsBlobFromDocxJs.arrayBuffer();
+        const questionsZip = await JSZip.loadAsync(arrayBuffer);
+        let documentXml = await questionsZip.file('word/document.xml').async('string');
+        const markerIndex = documentXml.indexOf(NONMC_INSERT_MARKER);
+        if (markerIndex === -1) {
+            console.warn('[injectNonMc] 找不到插入點 marker，跳過 XML 注入');
+            return questionsBlobFromDocxJs;
+        }
+        const pStartSearch = documentXml.lastIndexOf('<w:p', markerIndex);
+        const pEndSearch = documentXml.indexOf('</w:p>', markerIndex);
+        if (pStartSearch === -1 || pEndSearch === -1) {
+            console.warn('[injectNonMc] 無法定位 marker 段落，跳過 XML 注入');
+            return questionsBlobFromDocxJs;
+        }
+        const pEnd = pEndSearch + '</w:p>'.length;
+        const insertXml = selectedWordQuestions.map(q => q.xmlString).join('\n');
+        documentXml = documentXml.substring(0, pStartSearch) + insertXml + documentXml.substring(pEnd);
+        questionsZip.file('word/document.xml', documentXml);
+        const newBlob = await questionsZip.generateAsync({
+            type: 'blob',
+            mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            compression: 'DEFLATE'
+        });
+        console.log('[injectNonMc] XML 注入完成，共注入 ' + selectedWordQuestions.length + ' 題');
+        return newBlob;
+    } catch (e) {
+        console.error('[injectNonMc] 注入失敗:', e);
+        return questionsBlobFromDocxJs;
     }
 }
 
@@ -1427,13 +1548,13 @@ class WordGenerator {
             });
         }
 
-        // Word 非選擇題區塊（僅 Managerial，放在 MC/EX 之後）
+        // Word 非選擇題區塊（僅 Managerial）：標題 + marker，實際內容由 injectNonMcIntoQuestionsDocx 以 OOXML 注入
         if (currentSubject === 'managerial' && wordNonMcSelected && wordNonMcSelected.length > 0) {
             allChildren.push(
                 new docx.Paragraph({
                     children: [
                         new docx.TextRun({
-                            text: 'II. NON-MULTIPLE-CHOICE (Word)',
+                            text: 'II. NON-MULTIPLE-CHOICE',
                             bold: true,
                             size: 22
                         })
@@ -1441,33 +1562,16 @@ class WordGenerator {
                     spacing: { before: 400, after: 200 }
                 })
             );
-            wordNonMcSelected.forEach((w, idx) => {
-                if (idx > 0) {
-                    allChildren.push(new docx.Paragraph({ children: [], spacing: { before: 300, after: 0 } }));
-                }
-                const qLines = w.questionLines || [];
-                const lineOpts = { spacing: { after: 80 } };
-                if (qLines.length > 0) {
-                    const text = qLines.map(l => (l == null ? '' : String(l))).join('\n');
-                    allChildren.push(...toParagraphsByLine(text, lineOpts));
-                } else {
-                    allChildren.push(
-                        new docx.Paragraph({
-                            children: [new docx.TextRun({ text: `${w.originalId}.`, size: 22 })],
-                            ...lineOpts
+            allChildren.push(
+                new docx.Paragraph({
+                    children: [
+                        new docx.TextRun({
+                            text: NONMC_INSERT_MARKER,
+                            size: 2
                         })
-                    );
-                }
-                const underlineCount = 3;
-                for (let i = 0; i < underlineCount; i++) {
-                    allChildren.push(
-                        new docx.Paragraph({
-                            children: [new docx.TextRun({ text: '__________', size: 20 })],
-                            spacing: { after: 100 }
-                        })
-                    );
-                }
-            });
+                    ]
+                })
+            );
         }
 
         // 創建單一 section，包含所有內容（標題、表格、題目、EX）
@@ -1865,7 +1969,7 @@ class WordGenerator {
             });
         }
 
-        // Word 非選擇題區塊（僅 Managerial，放在 EX 之後）
+        // Word 非選擇題區塊（僅 Managerial，放在 EX 之後）；支援 OOXML segment 格式（id, previewText, xmlString）
         if (currentSubject === 'managerial' && wordNonMcSelected && wordNonMcSelected.length > 0) {
             answerChildren.push(
                 new docx.Paragraph({
@@ -1880,28 +1984,31 @@ class WordGenerator {
                 })
             );
             wordNonMcSelected.forEach((w, idx) => {
+                const isSegment = typeof w.xmlString === 'string';
+                const originalId = isSegment ? w.id : (w.originalId || '');
+                const qText = isSegment ? (w.previewText || '') : (w.questionLines || []).map(l => (l == null ? '' : String(l))).join('\n');
+                const hasAnswerSection = isSegment ? (w.xmlString && w.xmlString.includes('ANSWER:')) : (w.hasAnswerSection && (w.answerLines || []).length > 0);
+                const answerLines = isSegment ? [] : (w.answerLines || []);
                 if (idx > 0) {
                     answerChildren.push(new docx.Paragraph({ children: [], spacing: { before: 300, after: 0 } }));
                 }
                 answerChildren.push(
                     new docx.Paragraph({
-                        children: [new docx.TextRun({ text: w.originalId + '.', bold: true, size: 22 })],
+                        children: [new docx.TextRun({ text: originalId + '.', bold: true, size: 22 })],
                         spacing: { after: 100 }
                     })
                 );
-                const qLines = w.questionLines || [];
-                if (qLines.length > 0) {
-                    const qText = qLines.map(l => (l == null ? '' : String(l))).join('\n');
+                if (qText) {
                     answerChildren.push(...makeParagraphsFromLines(qText, { spacing: { after: 80 } }));
                 }
-                if (w.hasAnswerSection && (w.answerLines || []).length > 0) {
+                if (hasAnswerSection && answerLines.length > 0) {
                     answerChildren.push(
                         new docx.Paragraph({
                             children: [new docx.TextRun({ text: 'ANSWER:', bold: true, size: 20 })],
                             spacing: { after: 50 }
                         })
                     );
-                    const aText = w.answerLines.map(l => (l == null ? '' : String(l))).join('\n');
+                    const aText = answerLines.map(l => (l == null ? '' : String(l))).join('\n');
                     answerChildren.push(...makeParagraphsFromLines(aText, { spacing: { after: 80 }, indent: { left: 400 } }));
                 }
                 answerChildren.push(
@@ -2318,6 +2425,10 @@ if (wordClearBtn) {
     wordClearBtn.addEventListener('click', () => {
         wordFile = null;
         wordNonMcQuestions = [];
+        wordQuestionSegments = [];
+        wordDocxZip = null;
+        wordDocxStylesXml = null;
+        wordDocxNumberingXml = null;
         wordParseState = 'idle';
         if (wordInput) wordInput.value = '';
         if (wordRequestedInput) wordRequestedInput.value = '0';
@@ -2630,10 +2741,10 @@ generateBtn.addEventListener('click', async () => {
     }
 
     // Word 非選擇題驗證（僅 Managerial，且已上傳 Word 時）
-    if (!hasError && currentSubject === 'managerial' && wordParseState === 'parsed' && wordNonMcQuestions.length > 0) {
+    if (!hasError && currentSubject === 'managerial' && wordParseState === 'parsed' && wordQuestionSegments.length > 0) {
         clampWordRequested();
         const wReq = parseInt(wordRequestedInput && wordRequestedInput.value ? wordRequestedInput.value : 0, 10) || 0;
-        const wAvail = wordNonMcQuestions.length;
+        const wAvail = wordQuestionSegments.length;
         if (wReq < 0) {
             hasError = true;
             errorMessage = 'Word 要抽題數不能為負數';
@@ -2704,12 +2815,12 @@ generateBtn.addEventListener('click', async () => {
             }
         }
 
-        // Word 非選擇題抽題（僅 Managerial，且已上傳 Word 時；同一次 Generate 用同一組）
+        // Word 非選擇題抽題（僅 Managerial）：從 wordQuestionSegments 隨機抽，選中為 OOXML segment 陣列
         let wordNonMcSelected = [];
-        if (currentSubject === 'managerial' && wordParseState === 'parsed' && wordNonMcQuestions.length > 0 && wordRequestedInput) {
+        if (currentSubject === 'managerial' && wordParseState === 'parsed' && wordQuestionSegments.length > 0 && wordRequestedInput) {
             const wReq = parseInt(wordRequestedInput.value, 10) || 0;
             if (wReq > 0) {
-                wordNonMcSelected = generator.randomSelect(wordNonMcQuestions, wReq);
+                wordNonMcSelected = generator.randomSelect(wordQuestionSegments, wReq);
             }
         }
 
@@ -2720,7 +2831,10 @@ generateBtn.addEventListener('click', async () => {
         const wordGen = new WordGenerator();
         
         console.log('Generating Questions doc...');
-        const questionBlob = await wordGen.generateQuestionSheet(examName, examQuestions, examPoints, exSelectedAll, wordNonMcSelected);
+        let questionBlob = await wordGen.generateQuestionSheet(examName, examQuestions, examPoints, exSelectedAll, wordNonMcSelected);
+        if (wordNonMcSelected.length > 0) {
+            questionBlob = await injectNonMcIntoQuestionsDocx(questionBlob, wordNonMcSelected, wordDocxZip);
+        }
         console.log('Questions doc generated');
         
         console.log('Generating Answers doc...');
