@@ -827,6 +827,7 @@ function updateWordParseUI() {
 }
 
 const NONMC_INSERT_MARKER = '##__NONMC_INSERT_POINT__##';
+const NONMC_ANSWER_INSERT_MARKER = '##__NONMC_ANSWER_INSERT_POINT__##';
 
 async function injectNonMcIntoQuestionsDocx(questionsBlobFromDocxJs, selectedWordQuestions, originalWordZip) {
     try {
@@ -858,6 +859,39 @@ async function injectNonMcIntoQuestionsDocx(questionsBlobFromDocxJs, selectedWor
     } catch (e) {
         console.error('[injectNonMc] 注入失敗:', e);
         return questionsBlobFromDocxJs;
+    }
+}
+
+async function injectNonMcIntoAnswersDocx(answersBlobFromDocxJs, selectedWordQuestions, originalWordZip) {
+    try {
+        const arrayBuffer = await answersBlobFromDocxJs.arrayBuffer();
+        const answersZip = await JSZip.loadAsync(arrayBuffer);
+        let documentXml = await answersZip.file('word/document.xml').async('string');
+        const markerIndex = documentXml.indexOf(NONMC_ANSWER_INSERT_MARKER);
+        if (markerIndex === -1) {
+            console.warn('[injectNonMcAnswers] 找不到插入點 marker，跳過 XML 注入');
+            return answersBlobFromDocxJs;
+        }
+        const pStartSearch = documentXml.lastIndexOf('<w:p', markerIndex);
+        const pEndSearch = documentXml.indexOf('</w:p>', markerIndex);
+        if (pStartSearch === -1 || pEndSearch === -1) {
+            console.warn('[injectNonMcAnswers] 無法定位 marker 段落，跳過 XML 注入');
+            return answersBlobFromDocxJs;
+        }
+        const pEnd = pEndSearch + '</w:p>'.length;
+        const insertXml = selectedWordQuestions.map(q => q.xmlString).join('\n');
+        documentXml = documentXml.substring(0, pStartSearch) + insertXml + documentXml.substring(pEnd);
+        answersZip.file('word/document.xml', documentXml);
+        const newBlob = await answersZip.generateAsync({
+            type: 'blob',
+            mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            compression: 'DEFLATE'
+        });
+        console.log('[injectNonMcAnswers] XML 注入完成，共注入 ' + selectedWordQuestions.length + ' 題（含答案）');
+        return newBlob;
+    } catch (e) {
+        console.error('[injectNonMcAnswers] 注入失敗:', e);
+        return answersBlobFromDocxJs;
     }
 }
 
@@ -1969,13 +2003,13 @@ class WordGenerator {
             });
         }
 
-        // Word 非選擇題區塊（僅 Managerial，放在 EX 之後）；支援 OOXML segment 格式（id, previewText, xmlString）
+        // Word 非選擇題區塊（僅 Managerial，放在 EX 之後）：標題 + marker，實際內容由 injectNonMcIntoAnswersDocx 以 OOXML 注入
         if (currentSubject === 'managerial' && wordNonMcSelected && wordNonMcSelected.length > 0) {
             answerChildren.push(
                 new docx.Paragraph({
                     children: [
                         new docx.TextRun({
-                            text: 'II. NON-MULTIPLE-CHOICE (Word) - Answers',
+                            text: 'II. NON-MULTIPLE-CHOICE (ANSWERS)',
                             bold: true,
                             size: 22
                         })
@@ -1983,38 +2017,16 @@ class WordGenerator {
                     spacing: { before: 400, after: 200 }
                 })
             );
-            wordNonMcSelected.forEach((w, idx) => {
-                const isSegment = typeof w.xmlString === 'string';
-                const originalId = isSegment ? w.id : (w.originalId || '');
-                const qText = isSegment ? (w.previewText || '') : (w.questionLines || []).map(l => (l == null ? '' : String(l))).join('\n');
-                const hasAnswerSection = isSegment ? (w.xmlString && w.xmlString.includes('ANSWER:')) : (w.hasAnswerSection && (w.answerLines || []).length > 0);
-                const answerLines = isSegment ? [] : (w.answerLines || []);
-                if (idx > 0) {
-                    answerChildren.push(new docx.Paragraph({ children: [], spacing: { before: 300, after: 0 } }));
-                }
-                answerChildren.push(
-                    new docx.Paragraph({
-                        children: [new docx.TextRun({ text: originalId + '.', bold: true, size: 22 })],
-                        spacing: { after: 100 }
-                    })
-                );
-                if (qText) {
-                    answerChildren.push(...makeParagraphsFromLines(qText, { spacing: { after: 80 } }));
-                }
-                if (hasAnswerSection && answerLines.length > 0) {
-                    answerChildren.push(
-                        new docx.Paragraph({
-                            children: [new docx.TextRun({ text: 'ANSWER:', bold: true, size: 20 })],
-                            spacing: { after: 50 }
+            answerChildren.push(
+                new docx.Paragraph({
+                    children: [
+                        new docx.TextRun({
+                            text: NONMC_ANSWER_INSERT_MARKER,
+                            size: 2
                         })
-                    );
-                    const aText = answerLines.map(l => (l == null ? '' : String(l))).join('\n');
-                    answerChildren.push(...makeParagraphsFromLines(aText, { spacing: { after: 80 }, indent: { left: 400 } }));
-                }
-                answerChildren.push(
-                    new docx.Paragraph({ children: [], spacing: { after: 200 } })
-                );
-            });
+                    ]
+                })
+            );
         }
 
         // 將摘要表格和詳細題目都添加到同一個陣列
@@ -2838,7 +2850,10 @@ generateBtn.addEventListener('click', async () => {
         console.log('Questions doc generated');
         
         console.log('Generating Answers doc...');
-        const answerBlob = await wordGen.generateAnswerSheet(examName, examQuestions, exSelectedAll, wordNonMcSelected);
+        let answerBlob = await wordGen.generateAnswerSheet(examName, examQuestions, exSelectedAll, wordNonMcSelected);
+        if (wordNonMcSelected.length > 0) {
+            answerBlob = await injectNonMcIntoAnswersDocx(answerBlob, wordNonMcSelected, wordDocxZip);
+        }
         console.log('Answers doc generated');
         
         // 下載兩個檔案（分別下載，確保不會覆蓋）
