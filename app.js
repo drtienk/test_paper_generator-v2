@@ -1081,6 +1081,14 @@ function buildSourceParagraphXml(fileName) {
     return '<w:p xmlns:w="' + W_NS + '"><w:r><w:t>' + text + '</w:t></w:r></w:p>';
 }
 
+/**
+ * 建立 OOXML 換頁段落 <w:p>，用於在注入 Non-MC 內容前強制換頁，確保 Non-MC 第 1 題從新頁頁首開始。
+ * @returns {string} 合法的 <w:p> XML 字串（內含 w:br w:type="page"）
+ */
+function buildPageBreakParagraphXml() {
+    return '<w:p xmlns:w="' + W_NS + '"><w:r><w:br w:type="page"/></w:r></w:p>';
+}
+
 async function injectNonMcIntoQuestionsDocx(questionsBlobFromDocxJs, selectedWordQuestions, originalWordZip) {
     try {
         const arrayBuffer = await questionsBlobFromDocxJs.arrayBuffer();
@@ -1107,7 +1115,8 @@ async function injectNonMcIntoQuestionsDocx(questionsBlobFromDocxJs, selectedWor
                 return replaceFirstQuestionNumberWithRoman(withSpace, romanLabel);
             })
             .join('\n');
-        documentXml = documentXml.substring(0, pStartSearch) + insertXml + documentXml.substring(pEnd);
+        const pageBreakXml = buildPageBreakParagraphXml();
+        documentXml = documentXml.substring(0, pStartSearch) + pageBreakXml + '\n' + insertXml + documentXml.substring(pEnd);
         questionsZip.file('word/document.xml', documentXml);
         const newBlob = await questionsZip.generateAsync({
             type: 'blob',
@@ -1146,7 +1155,8 @@ async function injectNonMcIntoAnswersDocx(answersBlobFromDocxJs, selectedWordQue
             const finalXml = replaceFirstQuestionNumberWithRoman(q.xmlString, romanLabel);
             return srcP + '\n' + finalXml;
         }).join('\n');
-        documentXml = documentXml.substring(0, pStartSearch) + insertXml + documentXml.substring(pEnd);
+        const pageBreakXml = buildPageBreakParagraphXml();
+        documentXml = documentXml.substring(0, pStartSearch) + pageBreakXml + '\n' + insertXml + documentXml.substring(pEnd);
         answersZip.file('word/document.xml', documentXml);
         const newBlob = await answersZip.generateAsync({
             type: 'blob',
