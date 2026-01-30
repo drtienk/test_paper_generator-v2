@@ -35,12 +35,15 @@ let parser = null;
 let generator = null;
 
 // Word 非選擇題題庫（僅 Managerial）- OOXML 版：每題 = 一個外層 w:tbl
-let wordFile = null;
-let wordNonMcQuestions = [];       // 向後相容 UI 顯示（由 wordQuestionSegments 映射）
-let wordDocxZip = null;            // 原始 docx ZIP（用於 inject 時可選複製 styles）
+let wordFiles = [];                // File[] 多檔上傳
+let wordDocs = [];                 // [{ fileName, zip, stylesXml, numberingXml, segments }]
+let wordAllQuestionSegments = [];  // 合併後的 segments（含 sourceDocIndex, sourceFileName），供抽題用
+let wordFile = null;               // 向後相容：wordFiles[0]
+let wordNonMcQuestions = [];       // 向後相容 UI 顯示（由 wordAllQuestionSegments 映射）
+let wordDocxZip = null;            // 向後相容：wordDocs[0].zip
 let wordDocxStylesXml = null;
 let wordDocxNumberingXml = null;
-let wordQuestionSegments = [];     // [{ id, idNum, xmlString, previewText }, ...]
+let wordQuestionSegments = [];     // 向後相容：與 wordAllQuestionSegments 同步（總題庫陣列）
 let wordParseState = 'idle';       // 'idle' | 'parsing' | 'parsed' | 'error'
 const W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 
@@ -859,10 +862,15 @@ function segmentQuestionsFromXml(documentXml) {
     return questions;
 }
 
-async function parseWordFile(file) {
-    if (!file || !file.name.toLowerCase().endsWith('.docx')) return;
+async function parseWordFiles(files) {
+    const validFiles = Array.isArray(files) ? files : [files];
+    const docxFiles = validFiles.filter(f => f && f.name && f.name.toLowerCase().endsWith('.docx'));
+    if (docxFiles.length === 0) return;
     wordParseState = 'parsing';
-    wordFile = file;
+    wordFiles = [...docxFiles];
+    wordDocs = [];
+    wordAllQuestionSegments = [];
+    wordFile = null;
     wordNonMcQuestions = [];
     wordQuestionSegments = [];
     wordDocxZip = null;
@@ -870,23 +878,46 @@ async function parseWordFile(file) {
     wordDocxNumberingXml = null;
     updateWordParseUI();
     try {
-        const arrayBuffer = await file.arrayBuffer();
-        const zip = await JSZip.loadAsync(arrayBuffer);
-        wordDocxZip = zip;
-        const documentXmlFile = zip.file('word/document.xml');
-        if (!documentXmlFile) {
-            throw new Error('找不到 word/document.xml');
+        for (let i = 0; i < docxFiles.length; i++) {
+            const file = docxFiles[i];
+            const arrayBuffer = await file.arrayBuffer();
+            const zip = await JSZip.loadAsync(arrayBuffer);
+            const documentXmlFile = zip.file('word/document.xml');
+            if (!documentXmlFile) {
+                throw new Error(`「${file.name}」找不到 word/document.xml`);
+            }
+            const documentXml = await documentXmlFile.async('string');
+            const stylesFile = zip.file('word/styles.xml');
+            const numberingFile = zip.file('word/numbering.xml');
+            const stylesXml = stylesFile ? await stylesFile.async('string') : null;
+            const numberingXml = numberingFile ? await numberingFile.async('string') : null;
+            const segments = segmentQuestionsFromXml(documentXml);
+            const segmentsWithSource = segments.map(seg => ({
+                ...seg,
+                sourceDocIndex: i,
+                sourceFileName: file.name
+            }));
+            wordDocs.push({
+                fileName: file.name,
+                zip,
+                stylesXml,
+                numberingXml,
+                segments: segmentsWithSource
+            });
+            wordAllQuestionSegments.push(...segmentsWithSource);
         }
-        const documentXml = await documentXmlFile.async('string');
-        const stylesFile = zip.file('word/styles.xml');
-        const numberingFile = zip.file('word/numbering.xml');
-        wordDocxStylesXml = stylesFile ? await stylesFile.async('string') : null;
-        wordDocxNumberingXml = numberingFile ? await numberingFile.async('string') : null;
-        wordQuestionSegments = segmentQuestionsFromXml(documentXml);
-        if (wordQuestionSegments.length === 0) {
+        if (wordAllQuestionSegments.length === 0) {
             throw new Error('找不到題號格式 ^\\d+\\.（請確認 Word 檔案格式）');
         }
-        wordNonMcQuestions = wordQuestionSegments.map(q => ({
+        wordAllQuestionSegments.sort((a, b) => a.idNum - b.idNum);
+        wordQuestionSegments = wordAllQuestionSegments;
+        wordFile = wordFiles[0] || null;
+        if (wordDocs.length > 0) {
+            wordDocxZip = wordDocs[0].zip;
+            wordDocxStylesXml = wordDocs[0].stylesXml || null;
+            wordDocxNumberingXml = wordDocs[0].numberingXml || null;
+        }
+        wordNonMcQuestions = wordAllQuestionSegments.map(q => ({
             source: 'word',
             originalId: q.id,
             questionLines: [q.previewText],
@@ -896,8 +927,7 @@ async function parseWordFile(file) {
             _xmlSegment: q
         }));
         wordParseState = 'parsed';
-        console.log('[Word OOXML] 解析完成，找到 ' + wordQuestionSegments.length + ' 題');
-        console.log('[Word OOXML] 題號範圍: ' + wordQuestionSegments[0].id + ' – ' + wordQuestionSegments[wordQuestionSegments.length - 1].id);
+        console.log('[Word OOXML] 解析完成，共 ' + wordDocs.length + ' 檔，合計 ' + wordAllQuestionSegments.length + ' 題');
     } catch (e) {
         wordParseState = 'error';
         console.error('Word parse error:', e);
@@ -930,10 +960,32 @@ function updateWordParseUI() {
     }
     wordParseStatus.textContent = 'Parsed';
     wordParseStatus.style.color = '#0a0';
-    if (wordFileNameSpan) wordFileNameSpan.textContent = wordFile ? wordFile.name : '';
-    const n = wordQuestionSegments.length;
-    const rangeText = n > 0 ? '（題號 ' + wordQuestionSegments[0].id + '–' + wordQuestionSegments[n - 1].id + '）' : '';
+    const n = wordAllQuestionSegments.length;
+    if (wordFileNameSpan) {
+        if (wordDocs.length === 0) {
+            wordFileNameSpan.textContent = '';
+        } else if (wordDocs.length === 1) {
+            wordFileNameSpan.textContent = wordDocs[0].fileName;
+        } else {
+            const names = wordDocs.map(d => d.fileName);
+            wordFileNameSpan.textContent = names.length <= 2 ? names.join('、') : (names.slice(0, 2).join('、') + ' …');
+        }
+    }
+    const rangeText = n > 0 ? '（題號 ' + wordAllQuestionSegments[0].id + '–' + wordAllQuestionSegments[n - 1].id + '）' : '';
     if (wordAvailableSpan) wordAvailableSpan.textContent = n + ' 題' + rangeText;
+    const wordFileListEl = document.getElementById('wordFileList');
+    if (wordFileListEl && wordDocs.length > 0) {
+        wordFileListEl.innerHTML = wordDocs.map((doc, idx) => {
+            const segs = doc.segments;
+            const count = segs.length;
+            const range = count > 0 ? (segs[0].id + '–' + segs[count - 1].id) : '–';
+            return `<div>${doc.fileName}：${count} 題（題號 ${range}）</div>`;
+        }).join('');
+        wordFileListEl.style.display = 'block';
+    } else if (wordFileListEl) {
+        wordFileListEl.innerHTML = '';
+        wordFileListEl.style.display = 'none';
+    }
     if (wordConfig) wordConfig.style.display = 'block';
     if (wordRequestedInput) {
         wordRequestedInput.max = n;
@@ -2503,23 +2555,14 @@ pdfInput.addEventListener('change', (e) => {
     addFiles(files);
 });
 
-// Word 上傳區（僅 Managerial 顯示）：點擊選檔 + 拖曳上傳
+// Word 上傳區（僅 Managerial 顯示）：點擊選檔 + 拖曳上傳（支援多檔 .docx）
 function handleWordDrop(files) {
     if (currentSubject !== 'managerial') return;
     if (!files || files.length === 0) return;
-    if (files.length > 1) {
-        wordParseState = 'error';
-        if (wordParseStatus) {
-            wordParseStatus.textContent = '只接受單一 Word 檔，請一次拖曳一個 .docx 檔案';
-            wordParseStatus.style.color = '#c00';
-        }
-        if (wordConfig) wordConfig.style.display = 'none';
-        return;
-    }
-    const file = files[0];
-    const isDocx = (file.name && file.name.toLowerCase().endsWith('.docx')) ||
-        (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-    if (!isDocx) {
+    const list = Array.from(files);
+    const validDocx = list.filter(f => (f.name && f.name.toLowerCase().endsWith('.docx')) ||
+        (f.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'));
+    if (validDocx.length === 0) {
         wordParseState = 'error';
         if (wordParseStatus) {
             wordParseStatus.textContent = '請上傳 .docx 檔案（非選擇題題庫）';
@@ -2528,7 +2571,7 @@ function handleWordDrop(files) {
         if (wordConfig) wordConfig.style.display = 'none';
         return;
     }
-    parseWordFile(file);
+    parseWordFiles(validDocx);
 }
 
 function bindWordDropEvents() {
@@ -2552,13 +2595,19 @@ function bindWordDropEvents() {
 bindWordDropEvents();
 
 if (wordInput) {
+    wordInput.multiple = true;
     wordInput.addEventListener('change', (e) => {
-        const f = e.target.files && e.target.files[0];
-        if (f) parseWordFile(f);
+        const fileList = e.target.files;
+        if (fileList && fileList.length > 0) {
+            parseWordFiles(Array.from(fileList));
+        }
     });
 }
 if (wordClearBtn) {
     wordClearBtn.addEventListener('click', () => {
+        wordFiles = [];
+        wordDocs = [];
+        wordAllQuestionSegments = [];
         wordFile = null;
         wordNonMcQuestions = [];
         wordQuestionSegments = [];
@@ -2877,10 +2926,10 @@ generateBtn.addEventListener('click', async () => {
     }
 
     // Word 非選擇題驗證（僅 Managerial，且已上傳 Word 時）
-    if (!hasError && currentSubject === 'managerial' && wordParseState === 'parsed' && wordQuestionSegments.length > 0) {
+    if (!hasError && currentSubject === 'managerial' && wordParseState === 'parsed' && wordAllQuestionSegments.length > 0) {
         clampWordRequested();
         const wReq = parseInt(wordRequestedInput && wordRequestedInput.value ? wordRequestedInput.value : 0, 10) || 0;
-        const wAvail = wordQuestionSegments.length;
+        const wAvail = wordAllQuestionSegments.length;
         if (wReq < 0) {
             hasError = true;
             errorMessage = 'Word 要抽題數不能為負數';
@@ -2951,12 +3000,12 @@ generateBtn.addEventListener('click', async () => {
             }
         }
 
-        // Word 非選擇題抽題（僅 Managerial）：從 wordQuestionSegments 隨機抽，選中為 OOXML segment 陣列
+        // Word 非選擇題抽題（僅 Managerial）：從 wordAllQuestionSegments 隨機抽，選中為 OOXML segment 陣列
         let wordNonMcSelected = [];
-        if (currentSubject === 'managerial' && wordParseState === 'parsed' && wordQuestionSegments.length > 0 && wordRequestedInput) {
+        if (currentSubject === 'managerial' && wordParseState === 'parsed' && wordAllQuestionSegments.length > 0 && wordRequestedInput) {
             const wReq = parseInt(wordRequestedInput.value, 10) || 0;
             if (wReq > 0) {
-                wordNonMcSelected = generator.randomSelect(wordQuestionSegments, wReq);
+                wordNonMcSelected = generator.randomSelect(wordAllQuestionSegments, wReq);
             }
         }
 

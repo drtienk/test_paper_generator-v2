@@ -34,7 +34,7 @@
             <div id="wordUploadArea" style="padding: 0;">
                 <div id="wordDropZone" class="upload-area" style="padding: 24px;">
                     <p>拖曳 .docx 到此 / 點擊選檔</p>
-                    <input type="file" id="wordInput" accept=".docx" style="display: none;">
+                    <input type="file" id="wordInput" accept=".docx" multiple style="display: none;">
                 </div>
             </div>
             <div id="wordParseStatus" class="word-parse-status" style="margin-top: 12px; font-size: 14px; color: #555;"></div>
@@ -43,6 +43,7 @@
                     <span>檔名：</span><span id="wordFileNameSpan"></span>
                     <span style="margin-left: 12px;">可用非選擇題：</span><span id="wordAvailableSpan">0 題</span>
                 </div>
+                <div id="wordFileList" class="word-file-list" style="margin-bottom: 8px; font-size: 13px; color: #555;"></div>
                 <div style="display: flex; align-items: center; gap: 8px;">
                     <label for="wordRequestedInput">要抽幾題：</label>
                     <input type="number" id="wordRequestedInput" min="0" value="0" step="1" style="width: 70px; padding: 5px; border: 2px solid #ddd; border-radius: 4px; text-align: center;">
