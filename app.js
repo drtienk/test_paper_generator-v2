@@ -747,6 +747,75 @@ function stripAnswerFromWordTblXml(xmlString) {
     return new XMLSerializer().serializeToString(tbl);
 }
 
+/**
+ * 在已 strip 過 ANSWER 的 <w:tbl> XML 末尾新增空白作答列，且整表與新列皆無可見邊框/格線。
+ * 用於題目卷：每題題目後約 12 列空白，方便手寫作答；任何線條皆透明。
+ * @param {string} xmlString - 單題 <w:tbl> XML（應已經 stripAnswerFromWordTblXml 處理）
+ * @param {number} [blankLines=12] - 要新增的空白列數
+ * @returns {string} 處理後的 <w:tbl> XML
+ */
+function appendBlankAnswerSpaceToTblXml_NoLines(xmlString, blankLines = 12) {
+    if (!xmlString || typeof xmlString !== 'string' || blankLines < 1) return xmlString;
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(xmlString, 'application/xml');
+    const parseErr = doc.querySelector('parsererror');
+    if (parseErr) return xmlString;
+    const tbl = doc.documentElement;
+    if (!tbl || (tbl.localName !== 'tbl' && tbl.nodeName !== 'w:tbl')) return xmlString;
+
+    const docNs = tbl.namespaceURI || W_NS;
+
+    // 1) 取得或建立 tblPr，並建立/覆寫 tblBorders，六邊全部設為無邊框
+    let tblPr = tbl.getElementsByTagNameNS(docNs, 'tblPr')[0];
+    if (!tblPr) {
+        tblPr = doc.createElementNS(docNs, 'tblPr');
+        tbl.insertBefore(tblPr, tbl.firstChild);
+    }
+    let tblBorders = tblPr.getElementsByTagNameNS(docNs, 'tblBorders')[0];
+    if (tblBorders) tblPr.removeChild(tblBorders);
+    tblBorders = doc.createElementNS(docNs, 'tblBorders');
+    const borderNames = ['top', 'start', 'bottom', 'end', 'insideH', 'insideV'];
+    for (const name of borderNames) {
+        const border = doc.createElementNS(docNs, name);
+        border.setAttribute('val', 'nil');
+        border.setAttribute('sz', '0');
+        border.setAttribute('space', '0');
+        tblBorders.appendChild(border);
+    }
+    tblPr.appendChild(tblBorders);
+
+    // 2) 新增 blankLines 個空白列，每列一個 cell，cell 內空段落；新 cell 不畫線（tcBorders nil）
+    for (let i = 0; i < blankLines; i++) {
+        const tr = doc.createElementNS(docNs, 'tr');
+        const trPr = doc.createElementNS(docNs, 'trPr');
+        const trHeight = doc.createElementNS(docNs, 'trHeight');
+        trHeight.setAttribute('val', '360');
+        trHeight.setAttribute('hRule', 'atLeast');
+        trPr.appendChild(trHeight);
+        tr.appendChild(trPr);
+
+        const tc = doc.createElementNS(docNs, 'tc');
+        const tcPr = doc.createElementNS(docNs, 'tcPr');
+        const tcBorders = doc.createElementNS(docNs, 'tcBorders');
+        for (const name of borderNames) {
+            const border = doc.createElementNS(docNs, name);
+            border.setAttribute('val', 'nil');
+            border.setAttribute('sz', '0');
+            border.setAttribute('space', '0');
+            tcBorders.appendChild(border);
+        }
+        tcPr.appendChild(tcBorders);
+        tc.appendChild(tcPr);
+
+        const p = doc.createElementNS(docNs, 'p');
+        tc.appendChild(p);
+        tr.appendChild(tc);
+        tbl.appendChild(tr);
+    }
+
+    return new XMLSerializer().serializeToString(tbl);
+}
+
 // OOXML 層級題目切分：每題 = <w:body> 的一個直接子節點 <w:tbl>
 function segmentQuestionsFromXml(documentXml) {
     const parser = new DOMParser();
@@ -896,7 +965,11 @@ async function injectNonMcIntoQuestionsDocx(questionsBlobFromDocxJs, selectedWor
         }
         const pEnd = pEndSearch + '</w:p>'.length;
         const insertXml = selectedWordQuestions
-            .map(q => stripAnswerFromWordTblXml(q.xmlString))
+            .map(q => {
+                const stripped = stripAnswerFromWordTblXml(q.xmlString);
+                const withSpace = appendBlankAnswerSpaceToTblXml_NoLines(stripped, 12);
+                return withSpace;
+            })
             .join('\n');
         documentXml = documentXml.substring(0, pStartSearch) + insertXml + documentXml.substring(pEnd);
         questionsZip.file('word/document.xml', documentXml);
