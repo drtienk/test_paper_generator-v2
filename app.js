@@ -1951,6 +1951,7 @@ const generateBtn = document.getElementById('generateBtn');
 const generateStatus = document.getElementById('generateStatus');
 const wordUploadSection = document.getElementById('wordUploadSection');
 const wordUploadArea = document.getElementById('wordUploadArea');
+const wordDropZone = document.getElementById('wordDropZone');
 const wordInput = document.getElementById('wordInput');
 const wordParseStatus = document.getElementById('wordParseStatus');
 const wordConfig = document.getElementById('wordConfig');
@@ -2259,8 +2260,54 @@ pdfInput.addEventListener('change', (e) => {
     addFiles(files);
 });
 
-// Word 上傳區（僅 Managerial 顯示）
-if (wordUploadArea) wordUploadArea.addEventListener('click', () => { if (wordInput) wordInput.click(); });
+// Word 上傳區（僅 Managerial 顯示）：點擊選檔 + 拖曳上傳
+function handleWordDrop(files) {
+    if (currentSubject !== 'managerial') return;
+    if (!files || files.length === 0) return;
+    if (files.length > 1) {
+        wordParseState = 'error';
+        if (wordParseStatus) {
+            wordParseStatus.textContent = '只接受單一 Word 檔，請一次拖曳一個 .docx 檔案';
+            wordParseStatus.style.color = '#c00';
+        }
+        if (wordConfig) wordConfig.style.display = 'none';
+        return;
+    }
+    const file = files[0];
+    const isDocx = (file.name && file.name.toLowerCase().endsWith('.docx')) ||
+        (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    if (!isDocx) {
+        wordParseState = 'error';
+        if (wordParseStatus) {
+            wordParseStatus.textContent = '請上傳 .docx 檔案（非選擇題題庫）';
+            wordParseStatus.style.color = '#c00';
+        }
+        if (wordConfig) wordConfig.style.display = 'none';
+        return;
+    }
+    parseWordFile(file);
+}
+
+function bindWordDropEvents() {
+    if (!wordDropZone) return;
+    wordDropZone.addEventListener('click', () => { if (wordInput) wordInput.click(); });
+    wordDropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        wordDropZone.classList.add('dragover');
+    });
+    wordDropZone.addEventListener('dragleave', () => {
+        wordDropZone.classList.remove('dragover');
+    });
+    wordDropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        wordDropZone.classList.remove('dragover');
+        const files = Array.from(e.dataTransfer.files || []);
+        handleWordDrop(files);
+    });
+}
+
+bindWordDropEvents();
+
 if (wordInput) {
     wordInput.addEventListener('change', (e) => {
         const f = e.target.files && e.target.files[0];

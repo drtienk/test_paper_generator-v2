@@ -92,6 +92,12 @@ h2 {
     margin: 5px 0;
 }
 
+/* Word drop zone 拖曳時視覺（與 PDF upload-area 一致） */
+#wordDropZone.dragover {
+    background: #d0d8ff;
+    border-color: #764ba2;
+}
+
 .hint {
     color: #888;
     font-size: 14px;

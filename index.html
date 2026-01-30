@@ -31,9 +31,11 @@
         <!-- Word 非選擇題上傳（僅 Managerial 顯示） -->
         <section class="step" id="wordUploadSection">
             <h2>Upload WORD for Non-MC (.docx)</h2>
-            <div class="upload-area" id="wordUploadArea" style="padding: 24px;">
-                <p>點擊或拖放 .docx 檔案（非選擇題題庫）</p>
-                <input type="file" id="wordInput" accept=".docx" style="display: none;">
+            <div id="wordUploadArea" style="padding: 0;">
+                <div id="wordDropZone" class="upload-area" style="padding: 24px;">
+                    <p>拖曳 .docx 到此 / 點擊選檔</p>
+                    <input type="file" id="wordInput" accept=".docx" style="display: none;">
+                </div>
             </div>
             <div id="wordParseStatus" class="word-parse-status" style="margin-top: 12px; font-size: 14px; color: #555;"></div>
             <div id="wordConfig" style="margin-top: 12px; display: none;">
