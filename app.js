@@ -1742,8 +1742,8 @@ class WordGenerator {
 
                     const tableRows = group.lines.map(line => {
                         const cells = line.split('\t');
-                        // 補齊不足的欄位
-                        while (cells.length < maxCols) cells.push('');
+                        // 欄數不足時，前方補空欄（標題行對齊資料行右側欄位）
+                        while (cells.length < maxCols) cells.unshift('');
                         return new docx.TableRow({
                             children: cells.map(cellText =>
                                 new docx.TableCell({
@@ -2206,7 +2206,7 @@ class WordGenerator {
                     };
                     const tableRows = aGroup.lines.map(line => {
                         const cells = line.split('\t');
-                        while (cells.length < maxCols) cells.push('');
+                        while (cells.length < maxCols) cells.unshift('');
                         return new docx.TableRow({
                             children: cells.map(cellText =>
                                 new docx.TableCell({
