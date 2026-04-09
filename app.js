@@ -103,11 +103,11 @@ class PDFParser {
     reconstructLines(items) {
         if (!items || items.length === 0) return [];
 
-        // 提取每個 item 的位置和文字
+        // 提取每個 item 的位置、文字和寬度
         const positioned = items.map(item => {
             const x = item.transform ? item.transform[4] : 0;
             const y = item.transform ? item.transform[5] : 0;
-            return { x, y, str: item.str };
+            return { x, y, str: item.str, width: item.width || 0 };
         });
 
         // 依 Y 座標降序排序（PDF 座標系 Y 從下往上），再依 X 升序
@@ -118,6 +118,41 @@ class PDFParser {
             }
             return a.x - b.x; // X 升序（左邊的先）
         });
+
+        // 將同一行的 items 組合成文字（依 X 間距決定空格或 tab，保留表格對齊）
+        const buildLineText = (lineItems) => {
+            lineItems.sort((a, b) => a.x - b.x);
+            // 過濾掉空字串和純空白 items（PDF 用來佔位的）
+            const textItems = lineItems.filter(i => i.str.trim().length > 0);
+            if (textItems.length === 0) return '';
+            if (textItems.length === 1) return textItems[0].str;
+
+            // 計算整行的平均字元寬度
+            let totalW = 0, totalChars = 0;
+            for (const it of textItems) {
+                if (it.width > 0 && it.str.length > 0) {
+                    totalW += it.width;
+                    totalChars += it.str.length;
+                }
+            }
+            const charW = totalChars > 0 ? totalW / totalChars : 5;
+
+            let text = textItems[0].str;
+            for (let k = 1; k < textItems.length; k++) {
+                const prev = textItems[k - 1];
+                const curr = textItems[k];
+                const prevEndX = prev.x + prev.width;
+                const gapPx = curr.x - prevEndX;
+
+                if (gapPx > charW * 0.5) {
+                    // 欄位間距 → 用 tab 保留對齊（DOCX 會轉成 Tab 物件）
+                    text += '\t' + curr.str;
+                } else {
+                    text += ' ' + curr.str;
+                }
+            }
+            return text.trim();
+        };
 
         // 依 Y 座標分組成行（容差 3 單位）
         const lines = [];
@@ -131,8 +166,7 @@ class PDFParser {
             } else {
                 // 新的一行
                 if (currentLine.length > 0) {
-                    currentLine.sort((a, b) => a.x - b.x);
-                    const lineText = currentLine.map(i => i.str).join(' ').trim();
+                    const lineText = buildLineText(currentLine);
                     if (lineText) lines.push(lineText);
                 }
                 currentLine = [item];
@@ -142,8 +176,7 @@ class PDFParser {
 
         // 處理最後一行
         if (currentLine.length > 0) {
-            currentLine.sort((a, b) => a.x - b.x);
-            const lineText = currentLine.map(i => i.str).join(' ').trim();
+            const lineText = buildLineText(currentLine);
             if (lineText) lines.push(lineText);
         }
 
@@ -240,10 +273,18 @@ class PDFParser {
 
         for (var i = 0; i < questionContent.length; i++) {
             var line = questionContent[i];
-            if (line.indexOf(CIRCLE) !== -1) {
+            if (line.indexOf(CIRCLE) !== -1 || line.indexOf(ARROW) !== -1) {
                 foundFirstOption = true;
-                if (optionLines.length < 4) {
-                    optionLines.push(line);
+                // 拆分同一行中合併的多個選項（多個 CIRCLE/ARROW 標記）
+                var splitRe = new RegExp('(?=[' + CIRCLE + ARROW + '])', 'g');
+                var parts = line.split(splitRe);
+                for (var p = 0; p < parts.length; p++) {
+                    var part = parts[p].trim();
+                    if (part && (part.indexOf(CIRCLE) !== -1 || part.indexOf(ARROW) !== -1)) {
+                        if (optionLines.length < 4) {
+                            optionLines.push(part);
+                        }
+                    }
                 }
             } else if (!foundFirstOption) {
                 questionLines.push(line);
@@ -447,88 +488,147 @@ class PDFParser {
             // 移除標題行（MC.xx.xx 或 MC.xx.xx.ALGO）
             const headerPattern = /\b\d+\.\s*MC\.\d+\.\d+(?:\.ALGO)?\b\s*/i;
             let questionText = text.replace(headerPattern, '').trim();
-            
+
             // 移除標題行（如果沒有數字前綴）
             questionText = questionText.replace(new RegExp(`\\b${originalId}\\b\\s*`, 'i'), '').trim();
-            
+
             // 找到選項開始的位置
             // 選項可能是 "a." 或前面有 checkmark "✔ a." 或 "✓ a."
             const optionStartMatch = questionText.match(/(?:^|\n)\s*(?:[✔✓]\s*)?a\.\s/im);
-            if (!optionStartMatch) {
-                return null; // 沒有找到選項
-            }
-            const optionStartIndex = optionStartMatch.index;
-            
-            // 提取題目文字（從標題後到選項 "a." 之前）
-            let questionTextOnly = questionText.substring(0, optionStartIndex).trim();
-            
-            // 清理題目文字：移除多餘空白和換行
-            questionTextOnly = questionTextOnly.replace(/\s+/g, ' ').trim();
-            
-            // 提取選項部分（從 "a." 開始）
-            const optionsText = questionText.substring(optionStartIndex);
-            
-            // 提取選項（a. 到 e.）
+
+            let questionTextOnly = '';
             const options = [];
             let correctOption = null;
             let hasCheckmark = false;
-            
-            // 逐行解析選項
-            const lines = optionsText.split('\n');
-            let currentOption = null;
-            let currentText = '';
-            let currentHasCheck = false;
-            
-            for (const line of lines) {
-                const trimmed = line.trim();
-                if (!trimmed) continue;
-                
-                // 檢查是否是新選項行（a. 到 e.）
-                const newOptionMatch = trimmed.match(/^([✔✓])?\s*([a-e])\.\s*(.*)$/i);
-                if (newOptionMatch) {
-                    // 保存之前的選項
-                    if (currentOption !== null) {
-                        const optText = currentText.replace(/\s+/g, ' ').trim();
-                        if (currentHasCheck) {
-                            options.push(`${currentOption}. ${optText} ✔`);
-                            correctOption = currentOption;
-                            hasCheckmark = true;
-                        } else {
-                            options.push(`${currentOption}. ${optText}`);
+
+            if (optionStartMatch) {
+                // ===== 主路徑：選項有 a./b./c./d./e. 前綴 =====
+                const optionStartIndex = optionStartMatch.index;
+
+                // 提取題目文字（從標題後到選項 "a." 之前）
+                // 保留換行（讓表格式資料維持分行），但每行內多餘空白合併
+                questionTextOnly = questionText.substring(0, optionStartIndex).trim();
+                questionTextOnly = questionTextOnly.split('\n')
+                    .map(l => l.trim())
+                    .filter(l => l.length > 0)
+                    .join('\n');
+
+                // 提取選項部分（從 "a." 開始）
+                const optionsText = questionText.substring(optionStartIndex);
+
+                // 預處理：將同一行中合併的多個選項拆開
+                // 例如 "a. 440 units b. 360 units c. 600 units" → 各自獨立一行
+                // 注意：使用 [^\s✔✓] 而非 \S，避免把 "✔   c." 中的 ✔ 與 c. 拆開（會遺失正確答案標記）
+                const splitOptionsText = optionsText.replace(/([^\s✔✓])\s+(?=(?:[✔✓]\s*)?[b-e]\.\s)/gi, '$1\n');
+
+                // 逐行解析選項
+                const lines = splitOptionsText.split('\n');
+                let currentOption = null;
+                let currentText = '';
+                let currentHasCheck = false;
+
+                for (const line of lines) {
+                    const trimmed = line.trim();
+                    if (!trimmed) continue;
+
+                    // 檢查是否是新選項行（a. 到 e.）
+                    const newOptionMatch = trimmed.match(/^([✔✓])?\s*([a-e])\.\s*(.*)$/i);
+                    if (newOptionMatch) {
+                        // 保存之前的選項
+                        if (currentOption !== null) {
+                            const optText = currentText.replace(/\s+/g, ' ').trim();
+                            if (currentHasCheck) {
+                                options.push(`${currentOption}. ${optText} ✔`);
+                                correctOption = currentOption;
+                                hasCheckmark = true;
+                            } else {
+                                options.push(`${currentOption}. ${optText}`);
+                            }
                         }
+
+                        // 開始新選項
+                        currentHasCheck = !!newOptionMatch[1];
+                        currentOption = newOptionMatch[2].toLowerCase();
+                        currentText = newOptionMatch[3] || '';
+                    } else if (currentOption !== null) {
+                        // 檢查是否到了結束標記
+                        if (/^(Feedback|Check My Work|Post-Submission|Solution)/i.test(trimmed)) {
+                            break;
+                        }
+                        // 續行
+                        currentText += ' ' + trimmed;
                     }
-                    
-                    // 開始新選項
-                    currentHasCheck = !!newOptionMatch[1];
-                    currentOption = newOptionMatch[2].toLowerCase();
-                    currentText = newOptionMatch[3] || '';
-                } else if (currentOption !== null) {
-                    // 檢查是否到了結束標記
-                    if (/^(Feedback|Check My Work|Post-Submission|Solution)/i.test(trimmed)) {
+                }
+
+                // 保存最後一個選項
+                if (currentOption !== null) {
+                    const optText = currentText.replace(/\s+/g, ' ').trim();
+                    if (currentHasCheck) {
+                        options.push(`${currentOption}. ${optText} ✔`);
+                        correctOption = currentOption;
+                        hasCheckmark = true;
+                    } else {
+                        options.push(`${currentOption}. ${optText}`);
+                    }
+                }
+            } else {
+                // ===== 備用路徑：選項沒有 a./b./c./d./e. 前綴 =====
+                // 利用 ✔/✓ 標記和 Solution 行來定位選項區段
+                const solutionMatch = text.match(/Solution\s+([a-e])/i);
+                if (!solutionMatch) return null;
+
+                const correctLetter = solutionMatch[1].toLowerCase();
+                const correctIdx = correctLetter.charCodeAt(0) - 97; // 0-based
+
+                // 截取 header 之後、Feedback/Solution 之前的內容行
+                const endMarker = questionText.search(/^(Feedback|Check My Work|Post-Submission|Solution)\b/im);
+                const contentStr = endMarker >= 0 ? questionText.substring(0, endMarker) : questionText;
+                const contentLines = contentStr.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+
+                // 找到 ✔/✓ 標記行（即正確答案所在行）
+                let checkLineIdx = -1;
+                for (let ci = 0; ci < contentLines.length; ci++) {
+                    if (/^[✔✓]/.test(contentLines[ci])) {
+                        checkLineIdx = ci;
                         break;
                     }
-                    // 續行
-                    currentText += ' ' + trimmed;
+                }
+                if (checkLineIdx < 0) return null;
+
+                // ✔ 行 = 第 correctIdx 個選項 → 選項 a 在 checkLineIdx - correctIdx
+                const firstOptIdx = checkLineIdx - correctIdx;
+                if (firstOptIdx < 0) return null;
+
+                // 選項數量：至少到 ✔ 行之後可能還有更多選項，取到內容結尾
+                const totalOpts = contentLines.length - firstOptIdx;
+                if (totalOpts < 2 || totalOpts > 6) return null;
+
+                questionTextOnly = contentLines.slice(0, firstOptIdx).join('\n').trim();
+
+                for (let oi = 0; oi < totalOpts; oi++) {
+                    const rawLine = contentLines[firstOptIdx + oi];
+                    const letter = String.fromCharCode(97 + oi);
+                    const cleanLine = rawLine.replace(/^[✔✓]\s*/, '').trim();
+                    if (/^[✔✓]/.test(rawLine)) {
+                        options.push(`${letter}. ${cleanLine} ✔`);
+                        correctOption = letter;
+                        hasCheckmark = true;
+                    } else {
+                        options.push(`${letter}. ${cleanLine}`);
+                    }
+                }
+
+                // 如果 ✔ 行沒有被找到（理論上不會），用 Solution 做備用
+                if (!correctOption) {
+                    correctOption = correctLetter;
                 }
             }
-            
-            // 保存最後一個選項
-            if (currentOption !== null) {
-                const optText = currentText.replace(/\s+/g, ' ').trim();
-                if (currentHasCheck) {
-                    options.push(`${currentOption}. ${optText} ✔`);
-                    correctOption = currentOption;
-                    hasCheckmark = true;
-                } else {
-                    options.push(`${currentOption}. ${optText}`);
-                }
-            }
-            
-            // 驗證必須有至少 2 個選項（有些題目可能只有 a-d）
+
+            // 驗證必須有至少 2 個選項
             if (options.length < 2) {
                 return null;
             }
-            
+
             // 如果沒有找到 checkmark，嘗試從 Solution 行提取（備用）
             if (!correctOption) {
                 const solutionMatch = text.match(/Solution\s+([a-e])/i);
@@ -538,13 +638,12 @@ class PDFParser {
                     return null; // 沒有找到正確答案
                 }
             }
-            
+
             // 提取 Feedback（在 Feedback 標題之後，但排除 Post-Submission）
             let feedbackText = '';
             const feedbackMatch = text.match(/Feedback\s+(.+?)(?=Post-Submission|Check My Work|Solution|$)/is);
             if (feedbackMatch) {
                 feedbackText = feedbackMatch[1].trim();
-                // 移除 Post-Submission 如果存在
                 feedbackText = feedbackText.replace(/Post-Submission.*$/is, '').trim();
             }
             
@@ -1585,21 +1684,92 @@ class WordGenerator {
             let cleanedQuestionText = q.questionText.replace(/\(Appendix[^)]*\)/gi, '');
             // 移除 (Algorithmic) 標籤
             cleanedQuestionText = cleanedQuestionText.replace(/\(Algorithmic\)/gi, '');
-            // 清理可能留下的多餘空格
-            cleanedQuestionText = cleanedQuestionText.trim().replace(/\s+/g, ' ');
-            
+            // 清理可能留下的多餘空格（每行內合併，保留換行）
+            cleanedQuestionText = cleanedQuestionText.trim().split('\n')
+                .map(l => l.trim())
+                .filter(l => l.length > 0)
+                .join('\n');
+
             // 題目編號和文字（格式：1. 題目文字）
-            allChildren.push(
-                new docx.Paragraph({
-                    children: [
-                        new docx.TextRun({
-                            text: `${index + 1}. ${cleanedQuestionText}`,
-                            size: 22
+            // 若題目含有換行（如表格式資料），逐行建立段落
+            // 含 tab 的連續行 → 建立 Word 表格（docx.Table）保留欄位對齊
+            const qLines = cleanedQuestionText.split('\n');
+
+            // 將行分群：連續含 tab 的行為一組（表格），其餘為普通段落
+            const lineGroups = [];
+            let gi = 0;
+            while (gi < qLines.length) {
+                if (qLines[gi].includes('\t')) {
+                    // 收集連續含 tab 的行
+                    const tableLines = [];
+                    while (gi < qLines.length && qLines[gi].includes('\t')) {
+                        tableLines.push(qLines[gi]);
+                        gi++;
+                    }
+                    lineGroups.push({ type: 'table', lines: tableLines });
+                } else {
+                    lineGroups.push({ type: 'text', line: qLines[gi] });
+                    gi++;
+                }
+            }
+
+            // 依分群輸出
+            for (let gIdx = 0; gIdx < lineGroups.length; gIdx++) {
+                const group = lineGroups[gIdx];
+                const isFirst = (gIdx === 0);
+                const isLast = (gIdx === lineGroups.length - 1);
+
+                if (group.type === 'text') {
+                    const prefix = isFirst ? `${index + 1}. ` : '';
+                    allChildren.push(
+                        new docx.Paragraph({
+                            children: [new docx.TextRun({ text: prefix + group.line, size: 22 })],
+                            spacing: {
+                                before: isFirst && index === 0 ? 0 : (isFirst ? 300 : 0),
+                                after: isLast ? 200 : 40
+                            },
+                            indent: isFirst ? undefined : { left: 240 }
                         })
-                    ],
-                    spacing: { before: index === 0 ? 0 : 300, after: 200 }
-                })
-            );
+                    );
+                } else {
+                    // 建立 Word 表格
+                    const maxCols = Math.max(...group.lines.map(l => l.split('\t').length));
+                    const noBorder = { style: docx.BorderStyle.NONE || 'none', size: 0 };
+                    const noBorders = {
+                        top: noBorder, bottom: noBorder, left: noBorder, right: noBorder,
+                        insideHorizontal: noBorder, insideVertical: noBorder
+                    };
+
+                    const tableRows = group.lines.map(line => {
+                        const cells = line.split('\t');
+                        // 補齊不足的欄位
+                        while (cells.length < maxCols) cells.push('');
+                        return new docx.TableRow({
+                            children: cells.map(cellText =>
+                                new docx.TableCell({
+                                    children: [
+                                        new docx.Paragraph({
+                                            children: [new docx.TextRun({ text: cellText.trim(), size: 22 })],
+                                            spacing: { before: 0, after: 0 }
+                                        })
+                                    ],
+                                    borders: noBorders,
+                                    margins: { top: 0, bottom: 0, left: 40, right: 40 }
+                                })
+                            )
+                        });
+                    });
+
+                    allChildren.push(
+                        new docx.Table({
+                            rows: tableRows,
+                            width: { size: 80, type: docx.WidthType.PERCENTAGE },
+                            borders: noBorders,
+                            indent: { size: 240, type: docx.WidthType.DXA }
+                        })
+                    );
+                }
+            }
 
             // 選項（移除 ✔ 和 ✓ 標記）
             q.options.forEach(function(option) {
@@ -1990,18 +2160,79 @@ class WordGenerator {
         
         questions.forEach((q, index) => {
             // 1. 題目編號和文字（格式：1. 題目文字，與題目卷相同）
-            answerChildren.push(
-                new docx.Paragraph({
-                    children: [
-                        new docx.TextRun({
-                            text: `${index + 1}. ${q.questionText}`,
-                            size: 22
+            // 含 tab 的連續行 → 建立 Word 表格保留欄位對齊
+            const ansQLines = q.questionText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+
+            // 將行分群：連續含 tab 的行為一組（表格），其餘為普通段落
+            const ansLineGroups = [];
+            let agi = 0;
+            while (agi < ansQLines.length) {
+                if (ansQLines[agi].includes('\t')) {
+                    const tableLines = [];
+                    while (agi < ansQLines.length && ansQLines[agi].includes('\t')) {
+                        tableLines.push(ansQLines[agi]);
+                        agi++;
+                    }
+                    ansLineGroups.push({ type: 'table', lines: tableLines });
+                } else {
+                    ansLineGroups.push({ type: 'text', line: ansQLines[agi] });
+                    agi++;
+                }
+            }
+
+            for (let agIdx = 0; agIdx < ansLineGroups.length; agIdx++) {
+                const aGroup = ansLineGroups[agIdx];
+                const aIsFirst = (agIdx === 0);
+                const aIsLast = (agIdx === ansLineGroups.length - 1);
+
+                if (aGroup.type === 'text') {
+                    const prefix = aIsFirst ? `${index + 1}. ` : '';
+                    answerChildren.push(
+                        new docx.Paragraph({
+                            children: [new docx.TextRun({ text: prefix + aGroup.line, size: 22 })],
+                            spacing: {
+                                before: aIsFirst && index === 0 ? 0 : (aIsFirst ? 300 : 0),
+                                after: aIsLast ? 100 : 40
+                            },
+                            indent: aIsFirst ? undefined : { left: 240 }
                         })
-                    ],
-                    spacing: { before: index === 0 ? 0 : 300, after: 100 }
-                })
-            );
-            
+                    );
+                } else {
+                    const maxCols = Math.max(...aGroup.lines.map(l => l.split('\t').length));
+                    const noBorder = { style: docx.BorderStyle.NONE || 'none', size: 0 };
+                    const noBorders = {
+                        top: noBorder, bottom: noBorder, left: noBorder, right: noBorder,
+                        insideHorizontal: noBorder, insideVertical: noBorder
+                    };
+                    const tableRows = aGroup.lines.map(line => {
+                        const cells = line.split('\t');
+                        while (cells.length < maxCols) cells.push('');
+                        return new docx.TableRow({
+                            children: cells.map(cellText =>
+                                new docx.TableCell({
+                                    children: [
+                                        new docx.Paragraph({
+                                            children: [new docx.TextRun({ text: cellText.trim(), size: 22 })],
+                                            spacing: { before: 0, after: 0 }
+                                        })
+                                    ],
+                                    borders: noBorders,
+                                    margins: { top: 0, bottom: 0, left: 40, right: 40 }
+                                })
+                            )
+                        });
+                    });
+                    answerChildren.push(
+                        new docx.Table({
+                            rows: tableRows,
+                            width: { size: 80, type: docx.WidthType.PERCENTAGE },
+                            borders: noBorders,
+                            indent: { size: 240, type: docx.WidthType.DXA }
+                        })
+                    );
+                }
+            }
+
             // 2. 原始 ID（在題目文字下方）
             answerChildren.push(
                 new docx.Paragraph({
