@@ -1695,12 +1695,12 @@ class WordGenerator {
             // 含 tab 的連續行 → 建立 Word 表格（docx.Table）保留欄位對齊
             const qLines = cleanedQuestionText.split('\n');
 
-            // 將行分群：連續含 tab 的行為一組（表格），其餘為普通段落
+            // 將行分群：連續含 tab 的行為一組（表格），連續純文字行合併為單一段落
             const lineGroups = [];
             let gi = 0;
             while (gi < qLines.length) {
                 if (qLines[gi].includes('\t')) {
-                    // 收集連續含 tab 的行
+                    // 收集連續含 tab 的行 → 表格
                     const tableLines = [];
                     while (gi < qLines.length && qLines[gi].includes('\t')) {
                         tableLines.push(qLines[gi]);
@@ -1708,8 +1708,13 @@ class WordGenerator {
                     }
                     lineGroups.push({ type: 'table', lines: tableLines });
                 } else {
-                    lineGroups.push({ type: 'text', line: qLines[gi] });
-                    gi++;
+                    // 收集連續不含 tab 的行 → 合併為單一段落（PDF 折行問題）
+                    const textLines = [];
+                    while (gi < qLines.length && !qLines[gi].includes('\t')) {
+                        textLines.push(qLines[gi]);
+                        gi++;
+                    }
+                    lineGroups.push({ type: 'text', line: textLines.join(' ') });
                 }
             }
 
@@ -2175,8 +2180,13 @@ class WordGenerator {
                     }
                     ansLineGroups.push({ type: 'table', lines: tableLines });
                 } else {
-                    ansLineGroups.push({ type: 'text', line: ansQLines[agi] });
-                    agi++;
+                    // 收集連續不含 tab 的行 → 合併為單一段落
+                    const textLines = [];
+                    while (agi < ansQLines.length && !ansQLines[agi].includes('\t')) {
+                        textLines.push(ansQLines[agi]);
+                        agi++;
+                    }
+                    ansLineGroups.push({ type: 'text', line: textLines.join(' ') });
                 }
             }
 
