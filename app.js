@@ -1695,20 +1695,41 @@ class WordGenerator {
             // 含 tab 的連續行 → 建立 Word 表格（docx.Table）保留欄位對齊
             const qLines = cleanedQuestionText.split('\n');
 
-            // 將行分群：連續含 tab 的行為一組（表格），連續純文字行合併為單一段落
+            // 將行分群：2+ 個連續含 tab 的行為一組（表格），否則合併為文字
             const lineGroups = [];
             let gi = 0;
             while (gi < qLines.length) {
-                if (qLines[gi].includes('\t')) {
-                    // 收集連續含 tab 的行 → 表格
+                // 預先掃描連續含 tab 的行數
+                let tabLineCount = 0;
+                let scanGi = gi;
+                while (scanGi < qLines.length && qLines[scanGi].includes('\t')) {
+                    tabLineCount++;
+                    scanGi++;
+                }
+
+                if (tabLineCount >= 2) {
+                    // 2+ 個 tab 行 → 表格
                     const tableLines = [];
                     while (gi < qLines.length && qLines[gi].includes('\t')) {
                         tableLines.push(qLines[gi]);
                         gi++;
                     }
                     lineGroups.push({ type: 'table', lines: tableLines });
+                } else if (tabLineCount === 1) {
+                    // 1 個 tab 行 → 當成文字（移除 tab）
+                    const textLines = [];
+                    while (gi < qLines.length && !qLines[gi].includes('\t')) {
+                        textLines.push(qLines[gi]);
+                        gi++;
+                    }
+                    if (gi < qLines.length) {
+                        // 單一 tab 行
+                        textLines.push(qLines[gi].replace(/\t/g, ' '));
+                        gi++;
+                    }
+                    lineGroups.push({ type: 'text', line: textLines.join(' ') });
                 } else {
-                    // 收集連續不含 tab 的行 → 合併為單一段落（PDF 折行問題）
+                    // 0 個 tab 行 → 合併純文字
                     const textLines = [];
                     while (gi < qLines.length && !qLines[gi].includes('\t')) {
                         textLines.push(qLines[gi]);
@@ -2168,19 +2189,41 @@ class WordGenerator {
             // 含 tab 的連續行 → 建立 Word 表格保留欄位對齊
             const ansQLines = q.questionText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
 
-            // 將行分群：連續含 tab 的行為一組（表格），其餘為普通段落
+            // 將行分群：2+ 個連續含 tab 的行為一組（表格），否則合併為文字
             const ansLineGroups = [];
             let agi = 0;
             while (agi < ansQLines.length) {
-                if (ansQLines[agi].includes('\t')) {
+                // 預先掃描連續含 tab 的行數
+                let aTabLineCount = 0;
+                let aScanGi = agi;
+                while (aScanGi < ansQLines.length && ansQLines[aScanGi].includes('\t')) {
+                    aTabLineCount++;
+                    aScanGi++;
+                }
+
+                if (aTabLineCount >= 2) {
+                    // 2+ 個 tab 行 → 表格
                     const tableLines = [];
                     while (agi < ansQLines.length && ansQLines[agi].includes('\t')) {
                         tableLines.push(ansQLines[agi]);
                         agi++;
                     }
                     ansLineGroups.push({ type: 'table', lines: tableLines });
+                } else if (aTabLineCount === 1) {
+                    // 1 個 tab 行 → 當成文字（移除 tab）
+                    const textLines = [];
+                    while (agi < ansQLines.length && !ansQLines[agi].includes('\t')) {
+                        textLines.push(ansQLines[agi]);
+                        agi++;
+                    }
+                    if (agi < ansQLines.length) {
+                        // 單一 tab 行
+                        textLines.push(ansQLines[agi].replace(/\t/g, ' '));
+                        agi++;
+                    }
+                    ansLineGroups.push({ type: 'text', line: textLines.join(' ') });
                 } else {
-                    // 收集連續不含 tab 的行 → 合併為單一段落
+                    // 0 個 tab 行 → 合併純文字
                     const textLines = [];
                     while (agi < ansQLines.length && !ansQLines[agi].includes('\t')) {
                         textLines.push(ansQLines[agi]);
