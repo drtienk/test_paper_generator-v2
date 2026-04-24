@@ -514,12 +514,28 @@ class PDFParser {
                     .join('\n');
 
                 // 提取選項部分（從 "a." 開始）
-                const optionsText = questionText.substring(optionStartIndex);
+                let optionsText = questionText.substring(optionStartIndex);
+
+                // 前置處理：normalize tabs and structure from reconstructLines
+                // reconstructLines 可能產生 "a.\ttext\nb.\ttext\n✔\tc.\ttext" 的格式
+                // 需要先把 tabs 標準化為空格，然後拆開選項
+                optionsText = optionsText
+                    .replace(/\t+/g, ' ')  // 所有 tabs → spaces
+                    .replace(/\n\s*/g, '\n')  // 多餘空白標準化
+                    .trim();
 
                 // 預處理：將同一行中合併的多個選項拆開
                 // 例如 "a. 440 units b. 360 units c. 600 units" → 各自獨立一行
-                // 注意：使用 [^\s✔✓] 而非 \S，避免把 "✔   c." 中的 ✔ 與 c. 拆開（會遺失正確答案標記）
-                const splitOptionsText = optionsText.replace(/([^\s✔✓])\s+(?=(?:[✔✓]\s*)?[b-e]\.\s)/gi, '$1\n');
+                // 重點：選項標記應該在行首（\n 之後）或字串開始，不要在文句中間誤拆
+                // 例如 "Division B." 不應被視為選項標記
+                const splitOptionsText = optionsText
+                    // 首先標記所有行首的選項（加上前置標記以避免誤拆）
+                    .replace(/^(\s*(?:[✔✓]\s*)?[a-e]\.)/gm, '\n[OPT]$1')
+                    // 然後拆開合併在同一行的選項（基於行首標記）
+                    .replace(/([^\s✔✓])\s+(?=\[OPT\])/g, '$1\n')
+                    // 最後移除臨時標記
+                    .replace(/\[OPT\]/g, '')
+                    .replace(/^\n/, '');  // 移除開頭的多餘換行
 
                 // 逐行解析選項
                 const lines = splitOptionsText.split('\n');
