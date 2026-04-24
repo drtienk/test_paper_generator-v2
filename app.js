@@ -1711,47 +1711,42 @@ class WordGenerator {
             // 含 tab 的連續行 → 建立 Word 表格（docx.Table）保留欄位對齊
             const qLines = cleanedQuestionText.split('\n');
 
-            // 將行分群：2+ 個連續含 tab 的行為一組（表格），否則合併為文字
+            // 將行分群：2+ 個連續的多列表格行（2+ tabs）為一組（表格），否則合併為文字
+            // 注意：只有 2+ tabs（3+ 列）的行才算表格行。1 個 tab 的行只是標籤-值對，應合併為文字
             const lineGroups = [];
             let gi = 0;
             while (gi < qLines.length) {
-                // 預先掃描連續含 tab 的行數
-                let tabLineCount = 0;
+                // 預先掃描連續的多列表格行（2+ tabs）
+                let multiColTableLineCount = 0;
                 let scanGi = gi;
-                while (scanGi < qLines.length && qLines[scanGi].includes('\t')) {
-                    tabLineCount++;
+                while (scanGi < qLines.length && (qLines[scanGi].match(/\t/g) || []).length >= 2) {
+                    multiColTableLineCount++;
                     scanGi++;
                 }
 
-                if (tabLineCount >= 2) {
-                    // 2+ 個 tab 行 → 表格
+                if (multiColTableLineCount >= 2) {
+                    // 2+ 個多列行 → 表格
                     const tableLines = [];
-                    while (gi < qLines.length && qLines[gi].includes('\t')) {
+                    while (gi < qLines.length && (qLines[gi].match(/\t/g) || []).length >= 2) {
                         tableLines.push(qLines[gi]);
                         gi++;
                     }
                     lineGroups.push({ type: 'table', lines: tableLines });
-                } else if (tabLineCount === 1) {
-                    // 1 個 tab 行 → 當成文字（移除 tab）
-                    const textLines = [];
-                    while (gi < qLines.length && !qLines[gi].includes('\t')) {
-                        textLines.push(qLines[gi]);
-                        gi++;
-                    }
-                    if (gi < qLines.length) {
-                        // 單一 tab 行
-                        textLines.push(qLines[gi].replace(/\t/g, ' '));
-                        gi++;
-                    }
-                    lineGroups.push({ type: 'text', line: textLines.join(' ') });
                 } else {
-                    // 0 個 tab 行 → 合併純文字
+                    // 0-1 個多列行 → 合併為文字
                     const textLines = [];
-                    while (gi < qLines.length && !qLines[gi].includes('\t')) {
+                    while (gi < qLines.length && (qLines[gi].match(/\t/g) || []).length < 2) {
                         textLines.push(qLines[gi]);
                         gi++;
                     }
-                    lineGroups.push({ type: 'text', line: textLines.join(' ') });
+                    // 如果有收集到行，添加到 lineGroups（即使為空也要推進，避免無限循環）
+                    if (textLines.length > 0) {
+                        // 替換所有 tabs 為空格（把標籤-值對合併成文字）
+                        lineGroups.push({ type: 'text', line: textLines.map(l => l.replace(/\t/g, ' ')).join(' ') });
+                    } else if (multiColTableLineCount === 1 && gi < qLines.length) {
+                        // 只有 1 行 2+ tabs，跳過它當作孤立行（不形成表格）
+                        gi++;
+                    }
                 }
             }
 
@@ -2205,47 +2200,42 @@ class WordGenerator {
             // 含 tab 的連續行 → 建立 Word 表格保留欄位對齊
             const ansQLines = q.questionText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
 
-            // 將行分群：2+ 個連續含 tab 的行為一組（表格），否則合併為文字
+            // 將行分群：2+ 個連續的多列表格行（2+ tabs）為一組（表格），否則合併為文字
+            // 注意：只有 2+ tabs（3+ 列）的行才算表格行。1 個 tab 的行只是標籤-值對，應合併為文字
             const ansLineGroups = [];
             let agi = 0;
             while (agi < ansQLines.length) {
-                // 預先掃描連續含 tab 的行數
-                let aTabLineCount = 0;
+                // 預先掃描連續的多列表格行（2+ tabs）
+                let aMultiColTableLineCount = 0;
                 let aScanGi = agi;
-                while (aScanGi < ansQLines.length && ansQLines[aScanGi].includes('\t')) {
-                    aTabLineCount++;
+                while (aScanGi < ansQLines.length && (ansQLines[aScanGi].match(/\t/g) || []).length >= 2) {
+                    aMultiColTableLineCount++;
                     aScanGi++;
                 }
 
-                if (aTabLineCount >= 2) {
-                    // 2+ 個 tab 行 → 表格
+                if (aMultiColTableLineCount >= 2) {
+                    // 2+ 個多列行 → 表格
                     const tableLines = [];
-                    while (agi < ansQLines.length && ansQLines[agi].includes('\t')) {
+                    while (agi < ansQLines.length && (ansQLines[agi].match(/\t/g) || []).length >= 2) {
                         tableLines.push(ansQLines[agi]);
                         agi++;
                     }
                     ansLineGroups.push({ type: 'table', lines: tableLines });
-                } else if (aTabLineCount === 1) {
-                    // 1 個 tab 行 → 當成文字（移除 tab）
-                    const textLines = [];
-                    while (agi < ansQLines.length && !ansQLines[agi].includes('\t')) {
-                        textLines.push(ansQLines[agi]);
-                        agi++;
-                    }
-                    if (agi < ansQLines.length) {
-                        // 單一 tab 行
-                        textLines.push(ansQLines[agi].replace(/\t/g, ' '));
-                        agi++;
-                    }
-                    ansLineGroups.push({ type: 'text', line: textLines.join(' ') });
                 } else {
-                    // 0 個 tab 行 → 合併純文字
+                    // 0-1 個多列行 → 合併為文字
                     const textLines = [];
-                    while (agi < ansQLines.length && !ansQLines[agi].includes('\t')) {
+                    while (agi < ansQLines.length && (ansQLines[agi].match(/\t/g) || []).length < 2) {
                         textLines.push(ansQLines[agi]);
                         agi++;
                     }
-                    ansLineGroups.push({ type: 'text', line: textLines.join(' ') });
+                    // 如果有收集到行，添加到 ansLineGroups（即使為空也要推進，避免無限循環）
+                    if (textLines.length > 0) {
+                        // 替換所有 tabs 為空格（把標籤-值對合併成文字）
+                        ansLineGroups.push({ type: 'text', line: textLines.map(l => l.replace(/\t/g, ' ')).join(' ') });
+                    } else if (aMultiColTableLineCount === 1 && agi < ansQLines.length) {
+                        // 只有 1 行 2+ tabs，跳過它當作孤立行（不形成表格）
+                        agi++;
+                    }
                 }
             }
 
