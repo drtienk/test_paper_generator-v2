@@ -1757,7 +1757,23 @@ class WordGenerator {
                         spilledText.unshift(tableLines.pop());
                     }
                     if (tableLines.length >= 2) {
-                        lineGroups.push({ type: 'table', lines: tableLines });
+                        // 合併 PDF 換行產生的續行：若某行只有一個非空欄，且上一行同欄已有內容，則拼入上一行
+                        const mergedLines = [];
+                        for (const line of tableLines) {
+                            const cells = line.split('\t');
+                            const nonEmptyIdxs = cells.reduce((a, c, i) => { if (c.trim()) a.push(i); return a; }, []);
+                            if (nonEmptyIdxs.length === 1 && mergedLines.length > 0) {
+                                const idx = nonEmptyIdxs[0];
+                                const prevCells = mergedLines[mergedLines.length - 1].split('\t');
+                                if (idx < prevCells.length && prevCells[idx] && prevCells[idx].trim()) {
+                                    prevCells[idx] = prevCells[idx].trim() + ' ' + cells[idx].trim();
+                                    mergedLines[mergedLines.length - 1] = prevCells.join('\t');
+                                    continue;
+                                }
+                            }
+                            mergedLines.push(line);
+                        }
+                        lineGroups.push({ type: 'table', lines: mergedLines });
                     }
                     if (spilledText.length > 0) {
                         lineGroups.push({ type: 'text', line: spilledText.map(l => l.replace(/\t/g, ' ')).join(' ') });
@@ -1848,8 +1864,13 @@ class WordGenerator {
 
                     const tableRows = group.lines.map(line => {
                         const cells = line.split('\t');
-                        // 欄數不足時，前方補空欄（標題行對齊資料行右側欄位）
-                        while (cells.length < maxCols) cells.unshift('');
+                        // 欄數不足時，依內容起始欄決定補在前方或後方
+                        const firstNonEmpty = cells.findIndex(c => c.trim().length > 0);
+                        if (firstNonEmpty <= 0) {
+                            while (cells.length < maxCols) cells.unshift(''); // col-0 content: pad right
+                        } else {
+                            while (cells.length < maxCols) cells.push(''); // leading-empty: preserve position
+                        }
                         return new docx.TableRow({
                             children: cells.map((cellText, cellIdx) =>
                                 new docx.TableCell({
@@ -2308,7 +2329,23 @@ class WordGenerator {
                         spilledText.unshift(tableLines.pop());
                     }
                     if (tableLines.length >= 2) {
-                        ansLineGroups.push({ type: 'table', lines: tableLines });
+                        // 合併 PDF 換行產生的續行：若某行只有一個非空欄，且上一行同欄已有內容，則拼入上一行
+                        const mergedLines = [];
+                        for (const line of tableLines) {
+                            const cells = line.split('\t');
+                            const nonEmptyIdxs = cells.reduce((a, c, i) => { if (c.trim()) a.push(i); return a; }, []);
+                            if (nonEmptyIdxs.length === 1 && mergedLines.length > 0) {
+                                const idx = nonEmptyIdxs[0];
+                                const prevCells = mergedLines[mergedLines.length - 1].split('\t');
+                                if (idx < prevCells.length && prevCells[idx] && prevCells[idx].trim()) {
+                                    prevCells[idx] = prevCells[idx].trim() + ' ' + cells[idx].trim();
+                                    mergedLines[mergedLines.length - 1] = prevCells.join('\t');
+                                    continue;
+                                }
+                            }
+                            mergedLines.push(line);
+                        }
+                        ansLineGroups.push({ type: 'table', lines: mergedLines });
                     }
                     if (spilledText.length > 0) {
                         ansLineGroups.push({ type: 'text', line: spilledText.map(l => l.replace(/\t/g, ' ')).join(' ') });
@@ -2382,7 +2419,13 @@ class WordGenerator {
 
                     const tableRows = aGroup.lines.map(line => {
                         const cells = line.split('\t');
-                        while (cells.length < maxCols) cells.unshift('');
+                        // 欄數不足時，依內容起始欄決定補在前方或後方
+                        const firstNonEmpty = cells.findIndex(c => c.trim().length > 0);
+                        if (firstNonEmpty <= 0) {
+                            while (cells.length < maxCols) cells.unshift(''); // col-0 content: pad right
+                        } else {
+                            while (cells.length < maxCols) cells.push(''); // leading-empty: preserve position
+                        }
                         return new docx.TableRow({
                             children: cells.map((cellText, cellIdx) =>
                                 new docx.TableCell({
