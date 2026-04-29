@@ -1721,6 +1721,17 @@ class WordGenerator {
                 console.log(`[DEBUG] Q${index + 1} (${q.originalId}) Raw Lines (has tabs):`, qLines);
             }
 
+            // 判斷一行是否為「題目文字溢出到表格欄位」的行
+            // 若非第一欄（index ≥ 1）的儲存格文字超過 15 個字元且含空格，則判定為問題敘述文字
+            const isSpilledQuestionLine = (line) => {
+                const cells = line.split('\t');
+                for (let ci = 1; ci < cells.length; ci++) {
+                    const cell = cells[ci].trim();
+                    if (cell.length > 15 && cell.includes(' ')) return true;
+                }
+                return false;
+            };
+
             while (gi < qLines.length) {
                 // 掃描從當前位置開始連續含 tab 的行數（≥1 個 tab）
                 let tabRunLength = 0;
@@ -1733,8 +1744,23 @@ class WordGenerator {
                 if (tabRunLength >= 2) {
                     // 2+ 個連續含 tab 行 → 表格（無論是 1 tab 的二欄表格或 2+ tab 的多欄表格）
                     const tableLines = qLines.slice(gi, gi + tabRunLength);
-                    lineGroups.push({ type: 'table', lines: tableLines });
                     gi += tabRunLength;
+
+                    // 從表格尾端剝除「溢出的問題文字行」（如題目被 PDF 排版在表格欄位區域內）
+                    const spilledText = [];
+                    while (tableLines.length > 0 && isSpilledQuestionLine(tableLines[tableLines.length - 1])) {
+                        spilledText.unshift(tableLines.pop());
+                    }
+                    // 若表格剝除後只剩 1 行（不足以成表），也歸入文字
+                    if (tableLines.length === 1) {
+                        spilledText.unshift(tableLines.pop());
+                    }
+                    if (tableLines.length >= 2) {
+                        lineGroups.push({ type: 'table', lines: tableLines });
+                    }
+                    if (spilledText.length > 0) {
+                        lineGroups.push({ type: 'text', line: spilledText.map(l => l.replace(/\t/g, ' ')).join(' ') });
+                    }
                 } else {
                     // 不足 2 個連續含 tab 行 → 合併為文字（包含孤立的單行 tab，避免誤判為表格）
                     const textLines = [];
@@ -2227,6 +2253,16 @@ class WordGenerator {
             })
         );
         
+        // 判斷一行是否為「題目文字溢出到表格欄位」的行（答案卷用）
+        const isSpilledQuestionLine = (line) => {
+            const cells = line.split('\t');
+            for (let ci = 1; ci < cells.length; ci++) {
+                const cell = cells[ci].trim();
+                if (cell.length > 15 && cell.includes(' ')) return true;
+            }
+            return false;
+        };
+
         questions.forEach((q, index) => {
             // 1. 題目編號和文字（格式：1. 題目文字，與題目卷相同）
             // 含 tab 的連續行 → 建立 Word 表格保留欄位對齊
@@ -2248,8 +2284,22 @@ class WordGenerator {
                 if (aTabRunLength >= 2) {
                     // 2+ 個連續含 tab 行 → 表格
                     const tableLines = ansQLines.slice(agi, agi + aTabRunLength);
-                    ansLineGroups.push({ type: 'table', lines: tableLines });
                     agi += aTabRunLength;
+
+                    // 從表格尾端剝除「溢出的問題文字行」
+                    const spilledText = [];
+                    while (tableLines.length > 0 && isSpilledQuestionLine(tableLines[tableLines.length - 1])) {
+                        spilledText.unshift(tableLines.pop());
+                    }
+                    if (tableLines.length === 1) {
+                        spilledText.unshift(tableLines.pop());
+                    }
+                    if (tableLines.length >= 2) {
+                        ansLineGroups.push({ type: 'table', lines: tableLines });
+                    }
+                    if (spilledText.length > 0) {
+                        ansLineGroups.push({ type: 'text', line: spilledText.map(l => l.replace(/\t/g, ' ')).join(' ') });
+                    }
                 } else {
                     // 不足 2 個連續含 tab 行 → 合併為文字（孤立 tab 行亦視為文字）
                     const textLines = [];
