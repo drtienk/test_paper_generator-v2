@@ -1825,14 +1825,25 @@ class WordGenerator {
                             columnWidths[i] = Math.max(columnWidths[i], cells[i].trim().length);
                         }
                     }
-                    // 計算每欄相對寬度（基於最大寬度比例）
-                    // 頁面寬度約 9360 DXA（6.5 英寸，扣除邊距），分配給每欄
+                    // 計算每欄相對寬度（基於最大寬度比例，並正規化使總和不超過可用寬度）
+                    // 頁面寬度約 9360 DXA（6.5 英寸，扣除邊距）
                     const totalWidth = columnWidths.reduce((a, b) => a + b, 0) || 1;
-                    const availableWidth = 9360; // 總可用寬度（DXA）
-                    const columnSizes = columnWidths.map(w => Math.max(800, Math.round((w / totalWidth) * availableWidth))); // 最小 800 twips，總和不超過可用寬度
+                    const availableWidth = 9360;
+                    // 先按比例分配，空欄最小 100 DXA（不使用 800，避免膨脹總寬度）
+                    let columnSizes = columnWidths.map(w =>
+                        w === 0 ? 100 : Math.round((w / totalWidth) * availableWidth)
+                    );
+                    // 確保內容欄至少 400 DXA
+                    columnSizes = columnSizes.map((s, i) => columnWidths[i] > 0 ? Math.max(400, s) : s);
+                    // 正規化：若總寬超過可用寬度，按比例縮小
+                    const sizeTotal = columnSizes.reduce((a, b) => a + b, 0);
+                    if (sizeTotal > availableWidth) {
+                        const scale = availableWidth / sizeTotal;
+                        columnSizes = columnSizes.map(s => Math.max(100, Math.round(s * scale)));
+                    }
 
                     // 調試：記錄表格欄寬計算
-                    console.log(`[DEBUG] Q${index + 1} (${q.originalId}) Table: cols=${maxCols}, colWidths=`, columnWidths, '→ sizes=', columnSizes);
+                    console.log(`[DEBUG] Q${index + 1} (${q.originalId}) Table: cols=${maxCols}, colWidths=`, columnWidths, '→ sizes=', columnSizes, 'total=', columnSizes.reduce((a,b)=>a+b,0));
 
                     const tableRows = group.lines.map(line => {
                         const cells = line.split('\t');
@@ -2354,11 +2365,18 @@ class WordGenerator {
                             columnWidths[i] = Math.max(columnWidths[i], cells[i].trim().length);
                         }
                     }
-                    // 計算每欄相對寬度（基於最大寬度比例）
-                    // 頁面寬度約 9360 DXA（6.5 英寸，扣除邊距），分配給每欄
+                    // 計算每欄相對寬度（基於最大寬度比例，並正規化使總和不超過可用寬度）
                     const totalWidth = columnWidths.reduce((a, b) => a + b, 0) || 1;
-                    const availableWidth = 9360; // 總可用寬度（DXA）
-                    const columnSizes = columnWidths.map(w => Math.max(800, Math.round((w / totalWidth) * availableWidth))); // 最小 800 twips，總和不超過可用寬度
+                    const availableWidth = 9360;
+                    let columnSizes = columnWidths.map(w =>
+                        w === 0 ? 100 : Math.round((w / totalWidth) * availableWidth)
+                    );
+                    columnSizes = columnSizes.map((s, i) => columnWidths[i] > 0 ? Math.max(400, s) : s);
+                    const aSizeTotal = columnSizes.reduce((a, b) => a + b, 0);
+                    if (aSizeTotal > availableWidth) {
+                        const scale = availableWidth / aSizeTotal;
+                        columnSizes = columnSizes.map(s => Math.max(100, Math.round(s * scale)));
+                    }
 
                     const tableRows = aGroup.lines.map(line => {
                         const cells = line.split('\t');
