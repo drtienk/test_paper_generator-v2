@@ -1722,12 +1722,13 @@ class WordGenerator {
             }
 
             // 判斷一行是否為「題目文字溢出到表格欄位」的行
-            // 若非第一欄（index ≥ 1）的儲存格文字超過 15 個字元且含空格，則判定為問題敘述文字
+            // 條件：非第一欄（index ≥ 1）的儲存格文字 > 15 字、含空格、且不含數字/$/%
+            // （含數字/$/% 的是財務資料，如 "Standard: 300 pounds at $2.50"；純文字才是題目敘述）
             const isSpilledQuestionLine = (line) => {
                 const cells = line.split('\t');
                 for (let ci = 1; ci < cells.length; ci++) {
                     const cell = cells[ci].trim();
-                    if (cell.length > 15 && cell.includes(' ')) return true;
+                    if (cell.length > 15 && cell.includes(' ') && !/[\d$%]/.test(cell)) return true;
                 }
                 return false;
             };
@@ -2265,11 +2266,12 @@ class WordGenerator {
         );
         
         // 判斷一行是否為「題目文字溢出到表格欄位」的行（答案卷用）
+        // 條件：非第一欄文字 > 15 字、含空格、且不含數字/$/%（純文字句子才是溢出的題目敘述）
         const isSpilledQuestionLine = (line) => {
             const cells = line.split('\t');
             for (let ci = 1; ci < cells.length; ci++) {
                 const cell = cells[ci].trim();
-                if (cell.length > 15 && cell.includes(' ')) return true;
+                if (cell.length > 15 && cell.includes(' ') && !/[\d$%]/.test(cell)) return true;
             }
             return false;
         };
