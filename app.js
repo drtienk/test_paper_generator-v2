@@ -514,12 +514,28 @@ class PDFParser {
                     .join('\n');
 
                 // 提取選項部分（從 "a." 開始）
-                const optionsText = questionText.substring(optionStartIndex);
+                let optionsText = questionText.substring(optionStartIndex);
+
+                // 前置處理：normalize tabs and structure from reconstructLines
+                // reconstructLines 可能產生 "a.\ttext\nb.\ttext\n✔\tc.\ttext" 的格式
+                // 需要先把 tabs 標準化為空格，然後拆開選項
+                optionsText = optionsText
+                    .replace(/\t+/g, ' ')  // 所有 tabs → spaces
+                    .replace(/\n\s*/g, '\n')  // 多餘空白標準化
+                    .trim();
 
                 // 預處理：將同一行中合併的多個選項拆開
                 // 例如 "a. 440 units b. 360 units c. 600 units" → 各自獨立一行
-                // 注意：使用 [^\s✔✓] 而非 \S，避免把 "✔   c." 中的 ✔ 與 c. 拆開（會遺失正確答案標記）
-                const splitOptionsText = optionsText.replace(/([^\s✔✓])\s+(?=(?:[✔✓]\s*)?[b-e]\.\s)/gi, '$1\n');
+                // 重點：選項標記應該在行首（\n 之後）或字串開始，不要在文句中間誤拆
+                // 例如 "Division B." 不應被視為選項標記
+                const splitOptionsText = optionsText
+                    // 首先標記所有行首的選項（加上前置標記以避免誤拆）
+                    .replace(/^(\s*(?:[✔✓]\s*)?[a-e]\.)/gm, '\n[OPT]$1')
+                    // 然後拆開合併在同一行的選項（基於行首標記）
+                    .replace(/([^\s✔✓])\s+(?=\[OPT\])/g, '$1\n')
+                    // 最後移除臨時標記
+                    .replace(/\[OPT\]/g, '')
+                    .replace(/^\n/, '');  // 移除開頭的多餘換行
 
                 // 逐行解析選項
                 const lines = splitOptionsText.split('\n');
@@ -1695,48 +1711,83 @@ class WordGenerator {
             // 含 tab 的連續行 → 建立 Word 表格（docx.Table）保留欄位對齊
             const qLines = cleanedQuestionText.split('\n');
 
-            // 將行分群：2+ 個連續含 tab 的行為一組（表格），否則合併為文字
+            // 將行分群：2+ 個連續的多列表格行（2+ tabs）為一組（表格），否則合併為文字
+            // 注意：只有 2+ tabs（3+ 列）的行才算表格行。1 個 tab 的行只是標籤-值對，應合併為文字
             const lineGroups = [];
             let gi = 0;
+
+            // 調試：記錄含表格的題目原始行（用於排查表格格式）
+            if (qLines.some(l => (l.match(/\t/g) || []).length >= 1)) {
+                console.log(`[DEBUG] Q${index + 1} (${q.originalId}) Raw Lines (has tabs):`, qLines);
+            }
+
+            // 判斷一行是否為「題目文字溢出到表格欄位」的行
+            // 若非第一欄（index ≥ 1）的儲存格文字超過 15 個字元且含空格，則判定為問題敘述文字
+            const isSpilledQuestionLine = (line) => {
+                const cells = line.split('\t');
+                for (let ci = 1; ci < cells.length; ci++) {
+                    const cell = cells[ci].trim();
+                    if (cell.length > 15 && cell.includes(' ')) return true;
+                }
+                return false;
+            };
+
             while (gi < qLines.length) {
-                // 預先掃描連續含 tab 的行數
-                let tabLineCount = 0;
+                // 掃描從當前位置開始連續含 tab 的行數（≥1 個 tab）
+                let tabRunLength = 0;
                 let scanGi = gi;
-                while (scanGi < qLines.length && qLines[scanGi].includes('\t')) {
-                    tabLineCount++;
+                while (scanGi < qLines.length && (qLines[scanGi].match(/\t/g) || []).length >= 1) {
+                    tabRunLength++;
                     scanGi++;
                 }
 
-                if (tabLineCount >= 2) {
-                    // 2+ 個 tab 行 → 表格
-                    const tableLines = [];
-                    while (gi < qLines.length && qLines[gi].includes('\t')) {
-                        tableLines.push(qLines[gi]);
-                        gi++;
+                if (tabRunLength >= 2) {
+                    // 2+ 個連續含 tab 行 → 表格（無論是 1 tab 的二欄表格或 2+ tab 的多欄表格）
+                    const tableLines = qLines.slice(gi, gi + tabRunLength);
+                    gi += tabRunLength;
+
+                    // 從表格尾端剝除「溢出的問題文字行」（如題目被 PDF 排版在表格欄位區域內）
+                    const spilledText = [];
+                    while (tableLines.length > 0 && isSpilledQuestionLine(tableLines[tableLines.length - 1])) {
+                        spilledText.unshift(tableLines.pop());
                     }
-                    lineGroups.push({ type: 'table', lines: tableLines });
-                } else if (tabLineCount === 1) {
-                    // 1 個 tab 行 → 當成文字（移除 tab）
-                    const textLines = [];
-                    while (gi < qLines.length && !qLines[gi].includes('\t')) {
-                        textLines.push(qLines[gi]);
-                        gi++;
+                    // 若表格剝除後只剩 1 行（不足以成表），也歸入文字
+                    if (tableLines.length === 1) {
+                        spilledText.unshift(tableLines.pop());
                     }
-                    if (gi < qLines.length) {
-                        // 單一 tab 行
-                        textLines.push(qLines[gi].replace(/\t/g, ' '));
-                        gi++;
+                    if (tableLines.length >= 2) {
+                        lineGroups.push({ type: 'table', lines: tableLines });
                     }
-                    lineGroups.push({ type: 'text', line: textLines.join(' ') });
+                    if (spilledText.length > 0) {
+                        lineGroups.push({ type: 'text', line: spilledText.map(l => l.replace(/\t/g, ' ')).join(' ') });
+                    }
                 } else {
-                    // 0 個 tab 行 → 合併純文字
+                    // 不足 2 個連續含 tab 行 → 合併為文字（包含孤立的單行 tab，避免誤判為表格）
                     const textLines = [];
-                    while (gi < qLines.length && !qLines[gi].includes('\t')) {
+                    while (gi < qLines.length) {
+                        // 重新掃描：若從此處開始有 2+ 連續含 tab 行，代表是下一個表格的開頭，停止收集文字
+                        let nextRun = 0;
+                        let ns = gi;
+                        while (ns < qLines.length && (qLines[ns].match(/\t/g) || []).length >= 1) {
+                            nextRun++;
+                            ns++;
+                        }
+                        if (nextRun >= 2) break;
                         textLines.push(qLines[gi]);
                         gi++;
                     }
-                    lineGroups.push({ type: 'text', line: textLines.join(' ') });
+                    if (textLines.length > 0) {
+                        // 替換所有 tabs 為空格（孤立 tab 行當純文字）
+                        lineGroups.push({ type: 'text', line: textLines.map(l => l.replace(/\t/g, ' ')).join(' ') });
+                    }
                 }
+            }
+
+            // 調試：記錄含表格的題目分群結果
+            if (lineGroups.some(g => g.type === 'table')) {
+                console.log(`[DEBUG] Q${index + 1} (${q.originalId}) Line Groups (has table):`, lineGroups.map(g =>
+                    g.type === 'table' ? { type: 'table', lineCount: g.lines.length, maxCols: Math.max(...g.lines.map(l => l.split('\t').length)), lines: g.lines } : g
+                ));
             }
 
             // 依分群輸出
@@ -1766,12 +1817,29 @@ class WordGenerator {
                         insideHorizontal: noBorder, insideVertical: noBorder
                     };
 
+                    // 計算每欄的最大寬度（用於設定適當的欄寬）
+                    const columnWidths = Array(maxCols).fill(0);
+                    for (const line of group.lines) {
+                        const cells = line.split('\t');
+                        for (let i = 0; i < cells.length; i++) {
+                            columnWidths[i] = Math.max(columnWidths[i], cells[i].trim().length);
+                        }
+                    }
+                    // 計算每欄相對寬度（基於最大寬度比例）
+                    // 頁面寬度約 9360 DXA（6.5 英寸，扣除邊距），分配給每欄
+                    const totalWidth = columnWidths.reduce((a, b) => a + b, 0) || 1;
+                    const availableWidth = 9360; // 總可用寬度（DXA）
+                    const columnSizes = columnWidths.map(w => Math.max(800, Math.round((w / totalWidth) * availableWidth))); // 最小 800 twips，總和不超過可用寬度
+
+                    // 調試：記錄表格欄寬計算
+                    console.log(`[DEBUG] Q${index + 1} (${q.originalId}) Table: cols=${maxCols}, colWidths=`, columnWidths, '→ sizes=', columnSizes);
+
                     const tableRows = group.lines.map(line => {
                         const cells = line.split('\t');
                         // 欄數不足時，前方補空欄（標題行對齊資料行右側欄位）
                         while (cells.length < maxCols) cells.unshift('');
                         return new docx.TableRow({
-                            children: cells.map(cellText =>
+                            children: cells.map((cellText, cellIdx) =>
                                 new docx.TableCell({
                                     children: [
                                         new docx.Paragraph({
@@ -1780,7 +1848,8 @@ class WordGenerator {
                                         })
                                     ],
                                     borders: noBorders,
-                                    margins: { top: 0, bottom: 0, left: 40, right: 40 }
+                                    margins: { top: 0, bottom: 0, left: 40, right: 40 },
+                                    width: { size: columnSizes[cellIdx] || 1000, type: docx.WidthType.DXA }
                                 })
                             )
                         });
@@ -1789,7 +1858,7 @@ class WordGenerator {
                     allChildren.push(
                         new docx.Table({
                             rows: tableRows,
-                            width: { size: 80, type: docx.WidthType.PERCENTAGE },
+                            width: { size: 100, type: docx.WidthType.PERCENTAGE },
                             borders: noBorders,
                             indent: { size: 240, type: docx.WidthType.DXA }
                         })
@@ -2184,52 +2253,71 @@ class WordGenerator {
             })
         );
         
+        // 判斷一行是否為「題目文字溢出到表格欄位」的行（答案卷用）
+        const isSpilledQuestionLine = (line) => {
+            const cells = line.split('\t');
+            for (let ci = 1; ci < cells.length; ci++) {
+                const cell = cells[ci].trim();
+                if (cell.length > 15 && cell.includes(' ')) return true;
+            }
+            return false;
+        };
+
         questions.forEach((q, index) => {
             // 1. 題目編號和文字（格式：1. 題目文字，與題目卷相同）
             // 含 tab 的連續行 → 建立 Word 表格保留欄位對齊
             const ansQLines = q.questionText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
 
-            // 將行分群：2+ 個連續含 tab 的行為一組（表格），否則合併為文字
+            // 將行分群：2+ 個連續含 tab 行（≥1 tab）為一組（表格），否則合併為文字
+            // 規則：2 欄（1 tab）或多欄（2+ tabs）皆可形成表格，但須連續 2 行以上；孤立單行 tab 則視為文字
             const ansLineGroups = [];
             let agi = 0;
             while (agi < ansQLines.length) {
-                // 預先掃描連續含 tab 的行數
-                let aTabLineCount = 0;
+                // 掃描從當前位置開始連續含 tab 的行數（≥1 個 tab）
+                let aTabRunLength = 0;
                 let aScanGi = agi;
-                while (aScanGi < ansQLines.length && ansQLines[aScanGi].includes('\t')) {
-                    aTabLineCount++;
+                while (aScanGi < ansQLines.length && (ansQLines[aScanGi].match(/\t/g) || []).length >= 1) {
+                    aTabRunLength++;
                     aScanGi++;
                 }
 
-                if (aTabLineCount >= 2) {
-                    // 2+ 個 tab 行 → 表格
-                    const tableLines = [];
-                    while (agi < ansQLines.length && ansQLines[agi].includes('\t')) {
-                        tableLines.push(ansQLines[agi]);
-                        agi++;
+                if (aTabRunLength >= 2) {
+                    // 2+ 個連續含 tab 行 → 表格
+                    const tableLines = ansQLines.slice(agi, agi + aTabRunLength);
+                    agi += aTabRunLength;
+
+                    // 從表格尾端剝除「溢出的問題文字行」
+                    const spilledText = [];
+                    while (tableLines.length > 0 && isSpilledQuestionLine(tableLines[tableLines.length - 1])) {
+                        spilledText.unshift(tableLines.pop());
                     }
-                    ansLineGroups.push({ type: 'table', lines: tableLines });
-                } else if (aTabLineCount === 1) {
-                    // 1 個 tab 行 → 當成文字（移除 tab）
-                    const textLines = [];
-                    while (agi < ansQLines.length && !ansQLines[agi].includes('\t')) {
-                        textLines.push(ansQLines[agi]);
-                        agi++;
+                    if (tableLines.length === 1) {
+                        spilledText.unshift(tableLines.pop());
                     }
-                    if (agi < ansQLines.length) {
-                        // 單一 tab 行
-                        textLines.push(ansQLines[agi].replace(/\t/g, ' '));
-                        agi++;
+                    if (tableLines.length >= 2) {
+                        ansLineGroups.push({ type: 'table', lines: tableLines });
                     }
-                    ansLineGroups.push({ type: 'text', line: textLines.join(' ') });
+                    if (spilledText.length > 0) {
+                        ansLineGroups.push({ type: 'text', line: spilledText.map(l => l.replace(/\t/g, ' ')).join(' ') });
+                    }
                 } else {
-                    // 0 個 tab 行 → 合併純文字
+                    // 不足 2 個連續含 tab 行 → 合併為文字（孤立 tab 行亦視為文字）
                     const textLines = [];
-                    while (agi < ansQLines.length && !ansQLines[agi].includes('\t')) {
+                    while (agi < ansQLines.length) {
+                        // 重新掃描：若從此處開始有 2+ 連續含 tab 行，代表是下一個表格的開頭，停止
+                        let aNextRun = 0;
+                        let ans = agi;
+                        while (ans < ansQLines.length && (ansQLines[ans].match(/\t/g) || []).length >= 1) {
+                            aNextRun++;
+                            ans++;
+                        }
+                        if (aNextRun >= 2) break;
                         textLines.push(ansQLines[agi]);
                         agi++;
                     }
-                    ansLineGroups.push({ type: 'text', line: textLines.join(' ') });
+                    if (textLines.length > 0) {
+                        ansLineGroups.push({ type: 'text', line: textLines.map(l => l.replace(/\t/g, ' ')).join(' ') });
+                    }
                 }
             }
 
@@ -2257,11 +2345,26 @@ class WordGenerator {
                         top: noBorder, bottom: noBorder, left: noBorder, right: noBorder,
                         insideHorizontal: noBorder, insideVertical: noBorder
                     };
+
+                    // 計算每欄的最大寬度（用於設定適當的欄寬）
+                    const columnWidths = Array(maxCols).fill(0);
+                    for (const line of aGroup.lines) {
+                        const cells = line.split('\t');
+                        for (let i = 0; i < cells.length; i++) {
+                            columnWidths[i] = Math.max(columnWidths[i], cells[i].trim().length);
+                        }
+                    }
+                    // 計算每欄相對寬度（基於最大寬度比例）
+                    // 頁面寬度約 9360 DXA（6.5 英寸，扣除邊距），分配給每欄
+                    const totalWidth = columnWidths.reduce((a, b) => a + b, 0) || 1;
+                    const availableWidth = 9360; // 總可用寬度（DXA）
+                    const columnSizes = columnWidths.map(w => Math.max(800, Math.round((w / totalWidth) * availableWidth))); // 最小 800 twips，總和不超過可用寬度
+
                     const tableRows = aGroup.lines.map(line => {
                         const cells = line.split('\t');
                         while (cells.length < maxCols) cells.unshift('');
                         return new docx.TableRow({
-                            children: cells.map(cellText =>
+                            children: cells.map((cellText, cellIdx) =>
                                 new docx.TableCell({
                                     children: [
                                         new docx.Paragraph({
@@ -2270,7 +2373,8 @@ class WordGenerator {
                                         })
                                     ],
                                     borders: noBorders,
-                                    margins: { top: 0, bottom: 0, left: 40, right: 40 }
+                                    margins: { top: 0, bottom: 0, left: 40, right: 40 },
+                                    width: { size: columnSizes[cellIdx] || 1000, type: docx.WidthType.DXA }
                                 })
                             )
                         });
@@ -2278,7 +2382,7 @@ class WordGenerator {
                     answerChildren.push(
                         new docx.Table({
                             rows: tableRows,
-                            width: { size: 80, type: docx.WidthType.PERCENTAGE },
+                            width: { size: 100, type: docx.WidthType.PERCENTAGE },
                             borders: noBorders,
                             indent: { size: 240, type: docx.WidthType.DXA }
                         })
