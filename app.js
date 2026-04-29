@@ -1715,6 +1715,12 @@ class WordGenerator {
             // 注意：只有 2+ tabs（3+ 列）的行才算表格行。1 個 tab 的行只是標籤-值對，應合併為文字
             const lineGroups = [];
             let gi = 0;
+
+            // 調試：記錄問題的原始行（用於排查表格格式）
+            if (index === 19 && qLines.some(l => (l.match(/\t/g) || []).length >= 2)) {
+                console.log(`[DEBUG] Q${index + 1} (${q.originalId}) Raw Lines:`, qLines);
+            }
+
             while (gi < qLines.length) {
                 // 預先掃描連續的多列表格行（2+ tabs）
                 let multiColTableLineCount = 0;
@@ -1750,6 +1756,13 @@ class WordGenerator {
                 }
             }
 
+            // 調試：記錄問題的分群結果
+            if (index === 19) {
+                console.log(`[DEBUG] Q${index + 1} (${q.originalId}) Line Groups:`, lineGroups.map(g =>
+                    g.type === 'table' ? { type: 'table', lineCount: g.lines.length, maxCols: Math.max(...g.lines.map(l => l.split('\t').length)), lines: g.lines } : g
+                ));
+            }
+
             // 依分群輸出
             for (let gIdx = 0; gIdx < lineGroups.length; gIdx++) {
                 const group = lineGroups[gIdx];
@@ -1777,12 +1790,31 @@ class WordGenerator {
                         insideHorizontal: noBorder, insideVertical: noBorder
                     };
 
+                    // 計算每欄的最大寬度（用於設定適當的欄寬）
+                    const columnWidths = Array(maxCols).fill(0);
+                    for (const line of group.lines) {
+                        const cells = line.split('\t');
+                        for (let i = 0; i < cells.length; i++) {
+                            columnWidths[i] = Math.max(columnWidths[i], cells[i].trim().length);
+                        }
+                    }
+                    // 計算每欄相對寬度（基於最大寬度比例）
+                    // 頁面寬度約 9360 DXA（6.5 英寸，扣除邊距），分配給每欄
+                    const totalWidth = columnWidths.reduce((a, b) => a + b, 0) || 1;
+                    const availableWidth = 9360; // 總可用寬度（DXA）
+                    const columnSizes = columnWidths.map(w => Math.max(800, Math.round((w / totalWidth) * availableWidth))); // 最小 800 twips，總和不超過可用寬度
+
+                    // 調試：記錄表格欄寬計算
+                    if (index === 19) {
+                        console.log(`[DEBUG] Q${index + 1} Table Column Widths:`, { columnWidths, totalWidth, columnSizes, totalColumnSize: columnSizes.reduce((a, b) => a + b, 0) });
+                    }
+
                     const tableRows = group.lines.map(line => {
                         const cells = line.split('\t');
                         // 欄數不足時，前方補空欄（標題行對齊資料行右側欄位）
                         while (cells.length < maxCols) cells.unshift('');
                         return new docx.TableRow({
-                            children: cells.map(cellText =>
+                            children: cells.map((cellText, cellIdx) =>
                                 new docx.TableCell({
                                     children: [
                                         new docx.Paragraph({
@@ -1791,7 +1823,8 @@ class WordGenerator {
                                         })
                                     ],
                                     borders: noBorders,
-                                    margins: { top: 0, bottom: 0, left: 40, right: 40 }
+                                    margins: { top: 0, bottom: 0, left: 40, right: 40 },
+                                    width: { size: columnSizes[cellIdx] || 1000, type: docx.WidthType.DXA }
                                 })
                             )
                         });
@@ -1800,7 +1833,7 @@ class WordGenerator {
                     allChildren.push(
                         new docx.Table({
                             rows: tableRows,
-                            width: { size: 80, type: docx.WidthType.PERCENTAGE },
+                            width: { size: 100, type: docx.WidthType.PERCENTAGE },
                             borders: noBorders,
                             indent: { size: 240, type: docx.WidthType.DXA }
                         })
@@ -2263,11 +2296,26 @@ class WordGenerator {
                         top: noBorder, bottom: noBorder, left: noBorder, right: noBorder,
                         insideHorizontal: noBorder, insideVertical: noBorder
                     };
+
+                    // 計算每欄的最大寬度（用於設定適當的欄寬）
+                    const columnWidths = Array(maxCols).fill(0);
+                    for (const line of aGroup.lines) {
+                        const cells = line.split('\t');
+                        for (let i = 0; i < cells.length; i++) {
+                            columnWidths[i] = Math.max(columnWidths[i], cells[i].trim().length);
+                        }
+                    }
+                    // 計算每欄相對寬度（基於最大寬度比例）
+                    // 頁面寬度約 9360 DXA（6.5 英寸，扣除邊距），分配給每欄
+                    const totalWidth = columnWidths.reduce((a, b) => a + b, 0) || 1;
+                    const availableWidth = 9360; // 總可用寬度（DXA）
+                    const columnSizes = columnWidths.map(w => Math.max(800, Math.round((w / totalWidth) * availableWidth))); // 最小 800 twips，總和不超過可用寬度
+
                     const tableRows = aGroup.lines.map(line => {
                         const cells = line.split('\t');
                         while (cells.length < maxCols) cells.unshift('');
                         return new docx.TableRow({
-                            children: cells.map(cellText =>
+                            children: cells.map((cellText, cellIdx) =>
                                 new docx.TableCell({
                                     children: [
                                         new docx.Paragraph({
@@ -2276,7 +2324,8 @@ class WordGenerator {
                                         })
                                     ],
                                     borders: noBorders,
-                                    margins: { top: 0, bottom: 0, left: 40, right: 40 }
+                                    margins: { top: 0, bottom: 0, left: 40, right: 40 },
+                                    width: { size: columnSizes[cellIdx] || 1000, type: docx.WidthType.DXA }
                                 })
                             )
                         });
@@ -2284,7 +2333,7 @@ class WordGenerator {
                     answerChildren.push(
                         new docx.Table({
                             rows: tableRows,
-                            width: { size: 80, type: docx.WidthType.PERCENTAGE },
+                            width: { size: 100, type: docx.WidthType.PERCENTAGE },
                             borders: noBorders,
                             indent: { size: 240, type: docx.WidthType.DXA }
                         })
