@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Managerial Accounting Test Generator</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <div class="subject-row">
+            <label for="subjectSelect">Subject / Course：</label>
+            <select id="subjectSelect" class="subject-select">
+                <option value="managerial" selected>Managerial Accounting</option>
+                <option value="financial">Financial Accounting</option>
+            </select>
+        </div>
+        <h1 id="mainTitle">Managerial Accounting Test Generator</h1>
+        
+        <!--     上傳 PDF  -->
+        <section class="step">
+            <h2>步驟 1：上傳 PDF 檔案</h2>
+            <div class="upload-area" id="uploadArea">
+                <p>點擊或拖放 PDF 檔案到此處</p>
+                <p class="hint">可一次上傳多個檔案（每個 PDF 對應一個章節）</p>
+                <input type="file" id="pdfInput" multiple accept=".pdf" style="display: none;">
+            </div>
+            <div id="fileList" class="file-list"></div>
+        </section>
+
+        <!-- Word 非選擇題上傳（僅 Managerial 顯示） -->
+        <section class="step" id="wordUploadSection">
+            <h2>Upload WORD for Non-MC (.docx)</h2>
+            <div id="wordUploadArea" style="padding: 0;">
+                <div id="wordDropZone" class="upload-area" style="padding: 24px;">
+                    <p>拖曳 .docx 到此 / 點擊選檔</p>
+                    <input type="file" id="wordInput" accept=".docx" multiple style="display: none;">
+                </div>
+            </div>
+            <div id="wordParseStatus" class="word-parse-status" style="margin-top: 12px; font-size: 14px; color: #555;"></div>
+            <div id="wordConfig" style="margin-top: 12px; display: none;">
+                <div style="margin-bottom: 8px;">
+                    <span>檔名：</span><span id="wordFileNameSpan"></span>
+                    <span style="margin-left: 12px;">可用非選擇題：</span><span id="wordAvailableSpan">0 題</span>
+                </div>
+                <div id="wordFileList" class="word-file-list" style="margin-bottom: 8px; font-size: 13px; color: #555;"></div>
+                <div id="wordSumRequestedRow" style="margin-bottom: 8px; display: none;">Word Non-MC 總抽題數：<span id="wordSumRequestedSpan">0</span></div>
+                <div id="wordSingleRequestedRow" style="display: flex; align-items: center; gap: 8px;">
+                    <label for="wordRequestedInput">要抽幾題：</label>
+                    <input type="number" id="wordRequestedInput" min="0" value="0" step="1" style="width: 70px; padding: 5px; border: 2px solid #ddd; border-radius: 4px; text-align: center;">
+                    <button type="button" id="wordClearBtn" style="padding: 4px 10px; font-size: 13px;">清除</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- 設定出題規則 -->
+        <section class="step">
+            <h2>步驟 2：設定出題規則</h2>
+            <div class="form-group">
+                <label for="examName">考卷名稱：</label>
+                <input type="text" id="examName" placeholder="例如：Managerial Accounting" value="Managerial Accounting">
+                <div id="examNameBuilder" class="exam-name-builder" style="display: none;">
+                    <div class="builder-group" data-group="year">
+                        <div class="builder-label">Year</div>
+                        <button type="button" class="builder-btn" data-value="2026">2026</button>
+                        <button type="button" class="builder-btn" data-value="2027">2027</button>
+                        <button type="button" class="builder-btn" data-value="2028">2028</button>
+                        <button type="button" class="builder-btn" data-value="2029">2029</button>
+                        <button type="button" class="builder-btn" data-value="2030">2030</button>
+                    </div>
+                    <div class="builder-group" data-group="term">
+                        <div class="builder-label">Term</div>
+                        <button type="button" class="builder-btn" data-value="Spring">Spring</button>
+                        <button type="button" class="builder-btn" data-value="Fall">Fall</button>
+                    </div>
+                    <div class="builder-group" data-group="examType">
+                        <div class="builder-label">Exam</div>
+                        <button type="button" class="builder-btn" data-value="Exam 1">Exam 1</button>
+                        <button type="button" class="builder-btn" data-value="Exam 2">Exam 2</button>
+                        <button type="button" class="builder-btn" data-value="Exam 3">Exam 3</button>
+                        <button type="button" class="builder-btn" data-value="Final exam">Final exam</button>
+                    </div>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Exam Points：</label>
+                <div id="pointsConfig" style="margin-bottom: 10px;"></div>
+                <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px;">
+                    <button id="addPointsRowBtn" style="padding: 6px 12px; background: #667eea; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">+ Add Row</button>
+                </div>
+                <div style="display: flex; align-items: center; gap: 5px;">
+                    <label for="pointsTotalDisplay" style="font-size: 14px; color: #555; font-weight: bold;">Total Points：</label>
+                    <input type="text" id="pointsTotalDisplay" readonly value="200" style="width: 80px; padding: 5px; border: 2px solid #ddd; border-radius: 4px; text-align: center; background-color: #f5f5f5; font-weight: bold;">
+                </div>
+            </div>
+            <div class="form-group">
+                <p class="hint">請在上方檔案列表中為每個 PDF 設定要選擇的題目數量</p>
+            </div>
+        </section>
+
+        <!-- 解析狀態 -->
+        <section class="step" id="parseSection" style="display: none;">
+            <h2>步驟 3：解析 PDF</h2>
+            <div id="parseStatus" class="status"></div>
+            <div id="parsedQuestions" class="parsed-info"></div>
+        </section>
+
+        <!-- 生成試卷 -->
+        <section class="step" id="generateSection" style="display: none;">
+            <h2>步驟 4：生成試卷</h2>
+            <button id="generateBtn" class="btn-primary">Generate & Download DOCX</button>
+            <div id="generateStatus" class="status"></div>
+        </section>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script>
+        // 設定 pdf.js worker
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
