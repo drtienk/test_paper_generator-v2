@@ -144,8 +144,11 @@ class PDFParser {
                 const prevEndX = prev.x + prev.width;
                 const gapPx = curr.x - prevEndX;
 
-                if (gapPx > charW * 0.5) {
+                const tabGapThreshold = Math.max(charW * 2.5, 12);
+                if (gapPx > tabGapThreshold) {
                     // 欄位間距 → 用 tab 保留對齊（DOCX 會轉成 Tab 物件）
+                    // Use a conservative threshold so normal word spaces in PDF text items
+                    // do not become extra table columns in the generated DOCX.
                     text += '\t' + curr.str;
                 } else {
                     text += ' ' + curr.str;
@@ -1600,7 +1603,293 @@ class WordGenerator {
         return gridRows;
     }
 
+    _buildVarianceAnalysisLineGroups(lines) {
+        const sourceLines = (lines || []).map(line => String(line || '').trim()).filter(Boolean);
+        const headerIdx = sourceLines.findIndex(line => /\bStandard\s+Actual\b/i.test(line));
+        if (headerIdx < 0) return null;
+
+        const hasVarianceRows = sourceLines.slice(headerIdx + 1).some(line => /^(Standard|Actual)\s*:/i.test(line));
+        if (!hasVarianceRows) return null;
+
+        const beforeLines = sourceLines.slice(0, headerIdx).map(line => line.replace(/\t/g, ' '));
+        const afterLines = [];
+        const tableLines = [];
+        const headerLine = sourceLines[headerIdx].replace(/\t/g, ' ').replace(/\s+/g, ' ').trim();
+        let rowLabel = headerLine.replace(/\bStandard\s+Actual\b/i, '').trim();
+
+        if (!rowLabel && beforeLines.length > 0 && /:\s*$/.test(beforeLines[beforeLines.length - 1])) {
+            rowLabel = beforeLines.pop();
+        }
+
+        tableLines.push([rowLabel, 'Standard', 'Actual'].join('\t'));
+
+        for (let i = headerIdx + 1; i < sourceLines.length; i++) {
+            let line = sourceLines[i].replace(/\t/g, ' ').replace(/\s+/g, ' ').trim();
+            const promptMatch = line.match(/\s+\b(What|Calculate)\b/i);
+            let promptText = '';
+            if (promptMatch && promptMatch.index != null) {
+                promptText = line.substring(promptMatch.index).trim();
+                line = line.substring(0, promptMatch.index).trim();
+            }
+
+            if (/^(What|Calculate)\b/i.test(line)) {
+                afterLines.push(line);
+                continue;
+            }
+
+            const amountMatch = line.match(/^(Standard|Actual)\s*:\s*(.*)\s+(\$?[\d,]+(?:\.\d+)?)$/i);
+            if (amountMatch) {
+                const label = amountMatch[1].toLowerCase();
+                const description = `${amountMatch[1]}: ${(amountMatch[2] || '').trim()}`.trim();
+                const amount = (amountMatch[3] || '').trim();
+                tableLines.push([
+                    description,
+                    label === 'standard' ? amount : '',
+                    label === 'actual' ? amount : ''
+                ].join('\t'));
+                if (promptText) afterLines.push(promptText);
+                continue;
+            }
+
+            if (/^[A-Za-z][A-Za-z\s]+:\s*$/i.test(line)) {
+                tableLines.push([line, '', ''].join('\t'));
+                if (promptText) afterLines.push(promptText);
+                continue;
+            }
+
+            if (promptText) {
+                afterLines.push(promptText);
+            } else {
+                afterLines.push(line);
+            }
+        }
+
+        if (tableLines.length < 3) return null;
+
+        const groups = [];
+        if (beforeLines.length > 0) groups.push({ type: 'text', lines: beforeLines });
+        groups.push({ type: 'table', lines: tableLines });
+        if (afterLines.length > 0) groups.push({ type: 'text', lines: afterLines });
+        return groups;
+    }
+
+    _buildMonthAmountLineGroups(lines) {
+        const sourceLines = (lines || []).map(line => String(line || '').trim()).filter(Boolean);
+        if (!sourceLines.some(line => /\bas\s+follows\s*:/i.test(line))) return null;
+
+        const combined = sourceLines.map(line => line.replace(/\t/g, ' ').replace(/\s+/g, ' ').trim()).join(' ');
+        const monthAmountPattern = /\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\$?[\d,]+(?:\.\d+)?)/gi;
+        const matches = [...combined.matchAll(monthAmountPattern)];
+        if (matches.length < 2) return null;
+
+        const before = combined.substring(0, matches[0].index).trim();
+        const lastMatch = matches[matches.length - 1];
+        const after = combined.substring(lastMatch.index + lastMatch[0].length).trim();
+        const tableLines = ['Month\tActual cost'];
+
+        for (const match of matches) {
+            tableLines.push(`${match[1]}\t${match[2]}`);
+        }
+
+        const groups = [];
+        if (before) groups.push({ type: 'text', lines: [before] });
+        groups.push({ type: 'table', lines: tableLines });
+        if (after) groups.push({ type: 'text', lines: [after] });
+        return groups;
+    }
+
+    _buildActualResultsLineGroups(lines) {
+        const sourceLines = (lines || []).map(line => String(line || '').trim()).filter(Boolean);
+        const headerIdx = sourceLines.findIndex(line => /\bactual results\b.*\bas follows\s*:/i.test(line));
+        if (headerIdx < 0) return null;
+
+        const combined = sourceLines.map(line => line.replace(/\t/g, ' ').replace(/\s+/g, ' ').trim()).join(' ');
+        const headerMatch = combined.match(/\bactual results\b.*?\bas follows\s*:/i);
+        if (!headerMatch || headerMatch.index == null) return null;
+
+        const rowPattern = /\b(Units produced|Direct labor|Variable overhead|Fixed overhead)\s*:\s*/gi;
+        const rowMatches = [...combined.matchAll(rowPattern)];
+        if (rowMatches.length < 2) return null;
+
+        const before = combined.substring(0, rowMatches[0].index).trim();
+        const afterLines = [];
+        const tableLines = ['Item\tActual results'];
+
+        for (let i = 0; i < rowMatches.length; i++) {
+            const match = rowMatches[i];
+            const next = rowMatches[i + 1];
+            const label = match[1];
+            let value = combined.substring(match.index + match[0].length, next ? next.index : combined.length).trim();
+
+            const promptMatch = value.match(/\s+\b(Round|Calculate|What)\b/i);
+            if (promptMatch && promptMatch.index != null) {
+                const promptText = value.substring(promptMatch.index).trim();
+                value = value.substring(0, promptMatch.index).trim();
+                if (promptText) afterLines.push(promptText);
+            }
+
+            tableLines.push(`${label}\t${value}`);
+        }
+
+        if (tableLines.length < 3) return null;
+
+        const groups = [];
+        if (before) groups.push({ type: 'text', lines: [before] });
+        groups.push({ type: 'table', lines: tableLines });
+        if (afterLines.length > 0) groups.push({ type: 'text', lines: afterLines });
+        return groups;
+    }
+
+    _buildStandardsLineGroups(lines) {
+        const sourceLines = (lines || []).map(line => String(line || '').trim()).filter(Boolean);
+        const combined = sourceLines.map(line => line.replace(/\t/g, ' ').replace(/\s+/g, ' ').trim()).join(' ');
+        if (!/\b(materials?\s+and\s+labor|labor\s+and\s+materials?|production)\s+standards?\b.*\bas follows\s*:/i.test(combined)) return null;
+
+        const rowPattern = /\b(Direct materials|Direct material|Direct labor)\s*/gi;
+        const rowMatches = [...combined.matchAll(rowPattern)];
+        if (rowMatches.length < 2) return null;
+
+        const before = combined.substring(0, rowMatches[0].index).trim();
+        const afterLines = [];
+        const tableLines = ['Item\tStandard'];
+
+        for (let i = 0; i < rowMatches.length; i++) {
+            const match = rowMatches[i];
+            const next = rowMatches[i + 1];
+            const label = match[1];
+            let value = combined.substring(match.index + match[0].length, next ? next.index : combined.length).trim();
+
+            const tailMatch = value.match(/\s+\b(The company|During|What|Calculate)\b/i);
+            if (tailMatch && tailMatch.index != null) {
+                const tailText = value.substring(tailMatch.index).trim();
+                value = value.substring(0, tailMatch.index).trim();
+                if (tailText) afterLines.push(tailText);
+            }
+
+            tableLines.push(`${label}\t${value}`);
+        }
+
+        if (tableLines.length < 3) return null;
+
+        const groups = [];
+        if (before) groups.push({ type: 'text', lines: [before] });
+        groups.push({ type: 'table', lines: tableLines });
+        if (afterLines.length > 0) groups.push({ type: 'text', lines: afterLines });
+        return groups;
+    }
+
+    _buildOverheadInfoLineGroups(lines) {
+        const sourceLines = (lines || []).map(line => String(line || '').trim()).filter(Boolean);
+        const combined = sourceLines.map(line => line.replace(/\t/g, ' ').replace(/\s+/g, ' ').trim()).join(' ');
+        if (!/\bActual manufacturing overhead costs\b/i.test(combined) || !/\bStandard cost data\b/i.test(combined)) return null;
+
+        const actualMatch = combined.match(/\bActual manufacturing overhead costs\s*(\([^)]*\))?\s*(\$?[\d,]+(?:\.\d+)?)/i);
+        const factoryRateMatch = combined.match(/\bThe factory overhead rate\b/i);
+        const standardDataMatch = combined.match(/\bStandard cost data\b.*?\bwere as follows\s*:/i);
+        if (!actualMatch || actualMatch.index == null || !factoryRateMatch || factoryRateMatch.index == null || !standardDataMatch || standardDataMatch.index == null) return null;
+
+        const directSegment = combined.substring(actualMatch.index + actualMatch[0].length, factoryRateMatch.index).trim();
+        const directValue = directSegment
+            .replace(/^\s*(Item\s+Standard\s*)?/i, '')
+            .replace(/^\s*(Direct\s*:?\s*|Direct\s+labor\s*:?\s*)/i, '')
+            .replace(/\blabor\s+(?=Average actual labor cost)/i, '')
+            .trim();
+
+        const actualOverheadLine = `Actual manufacturing overhead costs${actualMatch[1] ? ' ' + actualMatch[1].trim() : ''} ${actualMatch[2]}`;
+        const directLaborLines = [];
+        const directLaborPatterns = [
+            ['Actual hours worked', /\bActual hours worked\s+([\d,]+\s*hrs?\.?)/i],
+            ['Standard hours allowed for actual production', /\bStandard hours allowed for actual production\s+([\d,]+\s*hrs?\.?)/i],
+            ['Average actual labor cost per hour', /\bAverage actual labor cost per hour\s+(\$?[\d,]+(?:\.\d+)?)/i]
+        ];
+        for (const row of directLaborPatterns) {
+            const match = directValue.match(row[1]);
+            if (match) directLaborLines.push(`${row[0]}\t${match[1].trim()}`);
+        }
+        if (directLaborLines.length === 0 && directValue) {
+            directLaborLines.push(`Direct labor\t${directValue}`);
+        }
+
+        const before = combined.substring(0, actualMatch.index).trim();
+        const factoryRateText = combined.substring(factoryRateMatch.index, standardDataMatch.index).trim();
+        const standardHeader = standardDataMatch[0].replace(/\bdirect\s+labor\s+direct hours\b/i, 'direct labor hours').trim();
+        const standardTail = combined
+            .substring(standardDataMatch.index + standardDataMatch[0].length)
+            .replace(/\bTotal\s+labor\s+factory overhead\b/gi, 'Total factory overhead')
+            .trim();
+
+        const costRowPattern = /\b(Variable overhead|Fixed factory overhead|Total factory overhead)\s+(\$?[\d,]+(?:\.\d+)?)/gi;
+        const costRows = [...standardTail.matchAll(costRowPattern)];
+        if (costRows.length < 2) return null;
+
+        const secondTableLines = [];
+        for (const row of costRows) {
+            secondTableLines.push(`${row[1]}\t${row[2]}`);
+        }
+
+        const lastRow = costRows[costRows.length - 1];
+        const after = standardTail.substring(lastRow.index + lastRow[0].length).trim();
+        const groups = [];
+        if (before) groups.push({ type: 'text', lines: [before] });
+        groups.push({ type: 'text', lines: [actualOverheadLine, 'Direct labor:'] });
+        if (directLaborLines.length > 0) groups.push({ type: 'table', lines: directLaborLines });
+        if (factoryRateText || standardHeader) groups.push({ type: 'text', lines: [factoryRateText, standardHeader].filter(Boolean) });
+        groups.push({ type: 'table', lines: secondTableLines });
+        if (after) groups.push({ type: 'text', lines: [after] });
+        return groups;
+    }
+
+    _buildUnitCostLineGroups(lines) {
+        const sourceLines = (lines || []).map(line => String(line || '').trim()).filter(Boolean);
+        const combined = sourceLines.map(line => line.replace(/\t/g, ' ').replace(/\s+/g, ' ').trim()).join(' ');
+        if (!/\bfollowing costs? for (?:one|a|an) \w+\s*:/i.test(combined)) return null;
+
+        const rowPattern = /\b(Direct materials?|Direct labor|Variable overhead|Fixed overhead|Total)\s+(\$?[\d,]+(?:\.\d+)?)/gi;
+        const rowMatches = [...combined.matchAll(rowPattern)];
+        if (rowMatches.length < 3) return null;
+
+        const before = combined.substring(0, rowMatches[0].index).trim();
+        const lastRow = rowMatches[rowMatches.length - 1];
+        const after = combined.substring(lastRow.index + lastRow[0].length).trim();
+        const tableLines = [];
+
+        for (const row of rowMatches) {
+            tableLines.push(`${row[1]}\t${row[2]}`);
+        }
+
+        const groups = [];
+        if (before) groups.push({ type: 'text', lines: [before] });
+        groups.push({ type: 'table', lines: tableLines });
+        if (after) groups.push({ type: 'text', lines: [after] });
+        return groups;
+    }
+
     // 生成題目卷（學生用）
+    _buildIncomeStatementLineGroups(lines) {
+        const sourceLines = (lines || []).map(line => String(line || '').trim()).filter(Boolean);
+        const combined = sourceLines.map(line => line.replace(/\t/g, ' ').replace(/\s+/g, ' ').trim()).join(' ');
+        if (!/\bfollowing income statement\s*:/i.test(combined)) return null;
+
+        const rowPattern = /\b(Sales|Cost of goods sold|Gross margin|Selling and administrative expense|Operating income|Less:\s*Income taxes \(at 30%\))\s+(\$?[\d,]+(?:\.\d+)?)/gi;
+        const rowMatches = [...combined.matchAll(rowPattern)];
+        if (rowMatches.length < 4) return null;
+
+        const before = combined.substring(0, rowMatches[0].index).trim();
+        const lastRow = rowMatches[rowMatches.length - 1];
+        const after = combined.substring(lastRow.index + lastRow[0].length).trim();
+        const tableLines = [];
+
+        for (const row of rowMatches) {
+            tableLines.push(`${row[1].replace(/\s+/g, ' ')}\t${row[2]}`);
+        }
+
+        const groups = [];
+        if (before) groups.push({ type: 'text', lines: [before] });
+        groups.push({ type: 'table', lines: tableLines });
+        if (after) groups.push({ type: 'text', lines: [after] });
+        return groups;
+    }
+
     async generateQuestionSheet(examName, questions, points, exSelectedAll = [], wordNonMcSelected = []) {
         // 所有內容將添加到同一個 section，確保連續流動
         const allChildren = [];
@@ -1624,6 +1913,44 @@ class WordGenerator {
                 }
             }
             return out;
+        };
+
+        const normalizeTextGroupLines = (lines) => {
+            const sourceLines = (lines || []).map(l => String(l || '').trim()).filter(Boolean);
+            const paragraphBreakPattern = /^(Materials|Direct materials|Direct labor|Indirect materials|Indirect labor|Manufacturing overhead|Variable overhead|Fixed overhead|Standard|Actual)\s*:|^(Answer|Solution|Feedback|Required)\b\s*:?\b/i;
+            const paragraphs = [];
+            const expandInlineMonthList = (paragraph) => {
+                if (!/\bas\s+follows\s*:/i.test(paragraph)) return [paragraph];
+                const monthAmountPattern = /\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\$?[\d,]+(?:\.\d+)?/gi;
+                const matches = [...paragraph.matchAll(monthAmountPattern)];
+                if (matches.length < 2) return [paragraph];
+
+                const expanded = [];
+                const firstStart = matches[0].index;
+                const prefix = paragraph.substring(0, firstStart).trim();
+                if (prefix) expanded.push(prefix);
+
+                for (const match of matches) {
+                    expanded.push(match[0].trim());
+                }
+
+                const lastMatch = matches[matches.length - 1];
+                const tail = paragraph.substring(lastMatch.index + lastMatch[0].length).trim();
+                if (tail) expanded.push(tail);
+                return expanded;
+            };
+
+            for (const line of sourceLines) {
+                if (paragraphs.length > 0 && paragraphBreakPattern.test(line)) {
+                    paragraphs.push(line);
+                } else if (paragraphs.length === 0) {
+                    paragraphs.push(line);
+                } else {
+                    paragraphs[paragraphs.length - 1] += ' ' + line;
+                }
+            }
+
+            return paragraphs.flatMap(expandInlineMonthList);
         };
 
         if (currentSubject === 'managerial') {
@@ -1713,8 +2040,15 @@ class WordGenerator {
 
             // 將行分群：2+ 個連續的多列表格行（2+ tabs）為一組（表格），否則合併為文字
             // 注意：只有 2+ tabs（3+ 列）的行才算表格行。1 個 tab 的行只是標籤-值對，應合併為文字
-            const lineGroups = [];
-            let gi = 0;
+            const varianceAnalysisGroups = this._buildVarianceAnalysisLineGroups(qLines);
+            const monthAmountGroups = varianceAnalysisGroups ? null : this._buildMonthAmountLineGroups(qLines);
+            const actualResultsGroups = (varianceAnalysisGroups || monthAmountGroups) ? null : this._buildActualResultsLineGroups(qLines);
+            const overheadInfoGroups = (varianceAnalysisGroups || monthAmountGroups || actualResultsGroups) ? null : this._buildOverheadInfoLineGroups(qLines);
+            const incomeStatementGroups = (varianceAnalysisGroups || monthAmountGroups || actualResultsGroups || overheadInfoGroups) ? null : this._buildIncomeStatementLineGroups(qLines);
+            const unitCostGroups = (varianceAnalysisGroups || monthAmountGroups || actualResultsGroups || overheadInfoGroups || incomeStatementGroups) ? null : this._buildUnitCostLineGroups(qLines);
+            const standardsGroups = (varianceAnalysisGroups || monthAmountGroups || actualResultsGroups || overheadInfoGroups || incomeStatementGroups || unitCostGroups) ? null : this._buildStandardsLineGroups(qLines);
+            const lineGroups = varianceAnalysisGroups || monthAmountGroups || actualResultsGroups || standardsGroups || overheadInfoGroups || incomeStatementGroups || unitCostGroups || [];
+            let gi = (varianceAnalysisGroups || monthAmountGroups || actualResultsGroups || standardsGroups || overheadInfoGroups || incomeStatementGroups || unitCostGroups) ? qLines.length : 0;
 
             // 調試：記錄含表格的題目原始行（用於排查表格格式）
             if (qLines.some(l => (l.match(/\t/g) || []).length >= 1)) {
@@ -1794,8 +2128,8 @@ class WordGenerator {
                         gi++;
                     }
                     if (textLines.length > 0) {
-                        // 替換所有 tabs 為空格（孤立 tab 行當純文字）
-                        lineGroups.push({ type: 'text', line: textLines.map(l => l.replace(/\t/g, ' ')).join(' ') });
+                        // 替換所有 tabs 為空格（孤立 tab 行當純文字），但保留 PDF 原本換行。
+                        lineGroups.push({ type: 'text', lines: textLines.map(l => l.replace(/\t/g, ' ')) });
                     }
                 }
             }
@@ -1814,17 +2148,22 @@ class WordGenerator {
                 const isLast = (gIdx === lineGroups.length - 1);
 
                 if (group.type === 'text') {
-                    const prefix = isFirst ? `${index + 1}. ` : '';
-                    allChildren.push(
-                        new docx.Paragraph({
-                            children: [new docx.TextRun({ text: prefix + group.line, size: 22 })],
-                            spacing: {
-                                before: isFirst && index === 0 ? 0 : (isFirst ? 300 : 0),
-                                after: isLast ? 200 : 40
-                            },
-                            indent: isFirst ? undefined : { left: 240 }
-                        })
-                    );
+                    const textGroupLines = normalizeTextGroupLines(group.lines || [group.line || '']);
+                    textGroupLines.forEach((line, lineIdx) => {
+                        const isFirstLine = lineIdx === 0;
+                        const isLastLine = lineIdx === textGroupLines.length - 1;
+                        const prefix = isFirst && isFirstLine ? `${index + 1}. ` : '';
+                        allChildren.push(
+                            new docx.Paragraph({
+                                children: [new docx.TextRun({ text: prefix + line, size: 22 })],
+                                spacing: {
+                                    before: isFirst && isFirstLine && index === 0 ? 0 : (isFirst && isFirstLine ? 300 : 0),
+                                    after: isLast && isLastLine ? 200 : 20
+                                },
+                                indent: isFirst && isFirstLine ? undefined : { left: 240 }
+                            })
+                        );
+                    });
                 } else {
                     // 建立 Word 表格
                     const maxCols = Math.max(...group.lines.map(l => l.split('\t').length));
@@ -1867,7 +2206,7 @@ class WordGenerator {
                         // 欄數不足時，依內容起始欄決定補在前方或後方
                         const firstNonEmpty = cells.findIndex(c => c.trim().length > 0);
                         if (firstNonEmpty <= 0) {
-                            while (cells.length < maxCols) cells.unshift(''); // col-0 content: pad right
+                            while (cells.length < maxCols) cells.push(''); // col-0 content: pad right
                         } else {
                             while (cells.length < maxCols) cells.push(''); // leading-empty: preserve position
                         }
@@ -2230,6 +2569,44 @@ class WordGenerator {
             }
             return out;
         };
+
+        const normalizeTextGroupLines = (lines) => {
+            const sourceLines = (lines || []).map(l => String(l || '').trim()).filter(Boolean);
+            const paragraphBreakPattern = /^(Materials|Direct materials|Direct labor|Indirect materials|Indirect labor|Manufacturing overhead|Variable overhead|Fixed overhead|Standard|Actual)\s*:|^(Answer|Solution|Feedback|Required)\b\s*:?\b/i;
+            const paragraphs = [];
+            const expandInlineMonthList = (paragraph) => {
+                if (!/\bas\s+follows\s*:/i.test(paragraph)) return [paragraph];
+                const monthAmountPattern = /\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\$?[\d,]+(?:\.\d+)?/gi;
+                const matches = [...paragraph.matchAll(monthAmountPattern)];
+                if (matches.length < 2) return [paragraph];
+
+                const expanded = [];
+                const firstStart = matches[0].index;
+                const prefix = paragraph.substring(0, firstStart).trim();
+                if (prefix) expanded.push(prefix);
+
+                for (const match of matches) {
+                    expanded.push(match[0].trim());
+                }
+
+                const lastMatch = matches[matches.length - 1];
+                const tail = paragraph.substring(lastMatch.index + lastMatch[0].length).trim();
+                if (tail) expanded.push(tail);
+                return expanded;
+            };
+
+            for (const line of sourceLines) {
+                if (paragraphs.length > 0 && paragraphBreakPattern.test(line)) {
+                    paragraphs.push(line);
+                } else if (paragraphs.length === 0) {
+                    paragraphs.push(line);
+                } else {
+                    paragraphs[paragraphs.length - 1] += ' ' + line;
+                }
+            }
+
+            return paragraphs.flatMap(expandInlineMonthList);
+        };
         
         // 添加摘要表格標題
         answerChildren.push(
@@ -2304,8 +2681,15 @@ class WordGenerator {
 
             // 將行分群：2+ 個連續含 tab 行（≥1 tab）為一組（表格），否則合併為文字
             // 規則：2 欄（1 tab）或多欄（2+ tabs）皆可形成表格，但須連續 2 行以上；孤立單行 tab 則視為文字
-            const ansLineGroups = [];
-            let agi = 0;
+            const answerVarianceAnalysisGroups = this._buildVarianceAnalysisLineGroups(ansQLines);
+            const answerMonthAmountGroups = answerVarianceAnalysisGroups ? null : this._buildMonthAmountLineGroups(ansQLines);
+            const answerActualResultsGroups = (answerVarianceAnalysisGroups || answerMonthAmountGroups) ? null : this._buildActualResultsLineGroups(ansQLines);
+            const answerOverheadInfoGroups = (answerVarianceAnalysisGroups || answerMonthAmountGroups || answerActualResultsGroups) ? null : this._buildOverheadInfoLineGroups(ansQLines);
+            const answerIncomeStatementGroups = (answerVarianceAnalysisGroups || answerMonthAmountGroups || answerActualResultsGroups || answerOverheadInfoGroups) ? null : this._buildIncomeStatementLineGroups(ansQLines);
+            const answerUnitCostGroups = (answerVarianceAnalysisGroups || answerMonthAmountGroups || answerActualResultsGroups || answerOverheadInfoGroups || answerIncomeStatementGroups) ? null : this._buildUnitCostLineGroups(ansQLines);
+            const answerStandardsGroups = (answerVarianceAnalysisGroups || answerMonthAmountGroups || answerActualResultsGroups || answerOverheadInfoGroups || answerIncomeStatementGroups || answerUnitCostGroups) ? null : this._buildStandardsLineGroups(ansQLines);
+            const ansLineGroups = answerVarianceAnalysisGroups || answerMonthAmountGroups || answerActualResultsGroups || answerStandardsGroups || answerOverheadInfoGroups || answerIncomeStatementGroups || answerUnitCostGroups || [];
+            let agi = (answerVarianceAnalysisGroups || answerMonthAmountGroups || answerActualResultsGroups || answerStandardsGroups || answerOverheadInfoGroups || answerIncomeStatementGroups || answerUnitCostGroups) ? ansQLines.length : 0;
             while (agi < ansQLines.length) {
                 // 掃描從當前位置開始連續含 tab 的行數（≥1 個 tab）
                 let aTabRunLength = 0;
@@ -2366,7 +2750,7 @@ class WordGenerator {
                         agi++;
                     }
                     if (textLines.length > 0) {
-                        ansLineGroups.push({ type: 'text', line: textLines.map(l => l.replace(/\t/g, ' ')).join(' ') });
+                        ansLineGroups.push({ type: 'text', lines: textLines.map(l => l.replace(/\t/g, ' ')) });
                     }
                 }
             }
@@ -2377,17 +2761,22 @@ class WordGenerator {
                 const aIsLast = (agIdx === ansLineGroups.length - 1);
 
                 if (aGroup.type === 'text') {
-                    const prefix = aIsFirst ? `${index + 1}. ` : '';
-                    answerChildren.push(
-                        new docx.Paragraph({
-                            children: [new docx.TextRun({ text: prefix + aGroup.line, size: 22 })],
-                            spacing: {
-                                before: aIsFirst && index === 0 ? 0 : (aIsFirst ? 300 : 0),
-                                after: aIsLast ? 100 : 40
-                            },
-                            indent: aIsFirst ? undefined : { left: 240 }
-                        })
-                    );
+                    const answerTextLines = normalizeTextGroupLines(aGroup.lines || [aGroup.line || '']);
+                    answerTextLines.forEach((line, lineIdx) => {
+                        const aIsFirstLine = lineIdx === 0;
+                        const aIsLastLine = lineIdx === answerTextLines.length - 1;
+                        const prefix = aIsFirst && aIsFirstLine ? `${index + 1}. ` : '';
+                        answerChildren.push(
+                            new docx.Paragraph({
+                                children: [new docx.TextRun({ text: prefix + line, size: 22 })],
+                                spacing: {
+                                    before: aIsFirst && aIsFirstLine && index === 0 ? 0 : (aIsFirst && aIsFirstLine ? 300 : 0),
+                                    after: aIsLast && aIsLastLine ? 100 : 20
+                                },
+                                indent: aIsFirst && aIsFirstLine ? undefined : { left: 240 }
+                            })
+                        );
+                    });
                 } else {
                     const maxCols = Math.max(...aGroup.lines.map(l => l.split('\t').length));
                     const noBorder = { style: docx.BorderStyle.NONE || 'none', size: 0 };
@@ -2422,7 +2811,7 @@ class WordGenerator {
                         // 欄數不足時，依內容起始欄決定補在前方或後方
                         const firstNonEmpty = cells.findIndex(c => c.trim().length > 0);
                         if (firstNonEmpty <= 0) {
-                            while (cells.length < maxCols) cells.unshift(''); // col-0 content: pad right
+                            while (cells.length < maxCols) cells.push(''); // col-0 content: pad right
                         } else {
                             while (cells.length < maxCols) cells.push(''); // leading-empty: preserve position
                         }
